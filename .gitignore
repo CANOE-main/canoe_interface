@@ -1,2 +1,4 @@
 input/canoe_config.json
 *.sqlite
+*.sqlite-journal
+*.log
