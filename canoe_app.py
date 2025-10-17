@@ -7,6 +7,7 @@ By David Turnbull
 from __future__ import annotations
 
 import csv
+import json
 import os
 import re
 import sqlite3
@@ -22,6 +23,8 @@ SQLITE_FOLDER = "input"
 # MASTER_DB = "master.sqlite"
 DATASETS_CSV = "input/datasets.csv"
 SCHEMA_FILE = "input/schema.sql"
+CONFIG_FILE = "input/canoe_config.json"
+
 
 ALL_REGIONS = [
     "AB", "BC", "MB", "ON", "QC", "SK", "NB", "NS", "PEI", "NLLAB"
@@ -271,6 +274,15 @@ def get_data_ids_from_csv(file_path: str) -> List[str]:
                 out.append(val)
     return out
 
+# New: lightweight config loader (returns dict)
+def load_config() -> dict:
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+    except Exception:
+        pass
+    return {}
 
 # ------------------------------
 # Desired IDs Builder (CCS removed)
@@ -658,6 +670,26 @@ def main(page: ft.Page) -> None:
     power_system_checkbox = ft.Checkbox(label="Power system model", value=False)
     image = ft.Container(content=ft.Image(src="./assets/logo.png", height=50, width=60), alignment=ft.alignment.top_right)
 
+    # load saved config (will be applied once UI elements are created)
+    saved_cfg = load_config()
+
+    def save_config() -> None:
+        """Persist current UI state to CONFIG_FILE (JSON)."""
+        try:
+            cfg = {
+                "input_filename": (in_filename_text_field.value or "").strip(),
+                "output_filename": (out_filename_text_field.value or "").strip(),
+                "power_system_model": bool(power_system_checkbox.value),
+                "matrix": { f"{r}|{s}": (matrix[(r, s)].value if (r, s) in matrix and matrix[(r, s)] is not None else None)
+                            for (r, s) in matrix.keys() },
+            }
+            os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+            with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
+                json.dump(cfg, fh, indent=2, ensure_ascii=False)
+        except Exception:
+            # silently ignore save failures to avoid interrupting UI
+            pass
+
     def get_current_regions() -> List[str]:
         # Regions always include all
         return ALL_REGIONS
@@ -691,6 +723,8 @@ def main(page: ft.Page) -> None:
                         dd.value = "Low CM"
                     elif s == "Elc" and dd.value == "NA":
                         dd.value = "High"
+        # persist change
+        save_config()
         page.update()
 
     def update_ui_matrix() -> None:
@@ -724,6 +758,23 @@ def main(page: ft.Page) -> None:
                 dd.data = region
                 dd.on_change = on_sector_dropdown_change
 
+                # If saved config contains a value for this cell, apply it
+                try:
+                    key = f"{region}|{sector}"
+                    if saved_cfg and saved_cfg.get("matrix") and key in saved_cfg["matrix"]:
+                        val = saved_cfg["matrix"].get(key)
+                        if val is not None:
+                            dd.value = val
+                except Exception:
+                    pass
+                # If power-system model is active, non-Elc sectors must be disabled/NA
+                try:
+                    if global_settings.get("power_system_model", False) and sector != "Elc":
+                        dd.value = "NA"
+                        dd.disabled = True
+                except Exception:
+                    pass
+
             matrix_rows.append(ft.Row(row_elements, alignment=ft.MainAxisAlignment.START))
 
         # push rows into the scrollable column
@@ -744,6 +795,7 @@ def main(page: ft.Page) -> None:
                 else:
                     dd.disabled = False
         page.update()
+        save_config()
 
     def reset_matrix(e: ft.ControlEvent | None = None) -> None:
         """Reset toggles and rebuild UI."""
@@ -751,6 +803,7 @@ def main(page: ft.Page) -> None:
         power_system_checkbox.value = False
         update_ui_matrix()
         page.update()
+        save_config()
 
     # --- Settings events ---
 
@@ -758,10 +811,15 @@ def main(page: ft.Page) -> None:
         global_settings["power_system_model"] = bool(e.control.value)
         update_ui_matrix()
         apply_dropdown_disabling()
+        save_config()
 
     power_system_checkbox.on_change = on_power_system_change
 
     # --- Submit / run aggregation ---
+
+    # attach saving to text field changes
+    in_filename_text_field.on_change = lambda e: save_config()
+    out_filename_text_field.on_change = lambda e: save_config()
 
     def on_submit(e: ft.ControlEvent) -> None:
         status_text.value = "Processing..."
@@ -786,6 +844,8 @@ def main(page: ft.Page) -> None:
             return
 
         try:
+            # persist current config before running
+            save_config()
             aggregate_sqlite_files(
                 matrix=matrix,
                 csv_ids=csv_ids,
@@ -800,7 +860,6 @@ def main(page: ft.Page) -> None:
         page.update()
 
     # --- Build initial matrix UI (all regions from the start) ---
-
     header_row = [ft.Text("Region/Sector", weight=ft.FontWeight.BOLD, width=120)] + [
         ft.Text(s, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER, width=80) for s in sectors
     ]
@@ -822,6 +881,18 @@ def main(page: ft.Page) -> None:
             dd.data = region
             dd.on_change = on_sector_dropdown_change
         matrix_rows.append(ft.Row(row_elements, alignment=ft.MainAxisAlignment.START))
+
+    # Apply saved text inputs / checkbox if present
+    try:
+        if saved_cfg:
+            in_filename_text_field.value = saved_cfg.get("input_filename", in_filename_text_field.value)
+            out_filename_text_field.value = saved_cfg.get("output_filename", out_filename_text_field.value)
+            # apply saved checkbox AND reflect it in global_settings so UI logic runs correctly
+            psm_saved = bool(saved_cfg.get("power_system_model", power_system_checkbox.value))
+            power_system_checkbox.value = psm_saved
+            global_settings["power_system_model"] = psm_saved
+    except Exception:
+        pass
 
     # Controls
     reset_button = ft.ElevatedButton("Reset Matrix", on_click=reset_matrix)
@@ -879,9 +950,9 @@ def main(page: ft.Page) -> None:
     page.add(main_content)
     page.update()
 
-    # Initial apply
+    # Build matrix from saved state first, then enforce disabling rules
+    update_ui_matrix()
     apply_dropdown_disabling()
 
-
 if __name__ == "__main__":
-    ft.app(target=main)
+    ft.app(target=main, assets_dir="./assets")
