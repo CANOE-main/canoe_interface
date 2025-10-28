@@ -97,6 +97,7 @@ GENERIC_BY_SECTOR = {
     "Tran": "TRPHR001",
 }
 
+# Canonicalized to NLLAB (was LAB). Include all known aliases in the list.
 REGION_ALIASES = {
     "AB": ["AB"],
     "BC": ["BC"],
@@ -107,7 +108,7 @@ REGION_ALIASES = {
     "NB": ["NB"],
     "NS": ["NS"],
     "PEI": ["PEI", "PE"],
-    "LAB": ["NLLAB", "NL", "LAB"],
+    "NLLAB": ["NLLAB", "NL", "LAB"],
     "USA": ["USA"],
 }
 
@@ -230,7 +231,15 @@ def filter_func(output_db: str) -> None:
 # ------------------------------
 
 def region_tokens(region: str) -> List[str]:
-    return REGION_ALIASES.get(region, [region])
+    """Return all alias tokens for a canonical region (or for a token)."""
+    toks = REGION_ALIASES.get(region)
+    if toks:
+        return toks
+    # If we were passed an alias token (e.g., 'NL'), find its family.
+    for canon, family in REGION_ALIASES.items():
+        if region == canon or region in family:
+            return family
+    return [region]
 
 
 def _ends_with_region_token_exact(_id: str, tok: str) -> bool:
@@ -274,6 +283,13 @@ def csv_match_intertie(csv_ids: Iterable[str], prefix: str, r1: str, r2: str) ->
             continue
         if any(mid == (a + b) or mid == (b + a) for a in r1t for b in r2t):
             out.add(_id)
+    return out
+
+# --- Robust tweak: tolerate both ELCHREINT/ELCHRBINT and plain EINT/BINT ----
+def csv_match_intertie_any(csv_ids: Iterable[str], prefixes: Iterable[str], r1: str, r2: str) -> Set[str]:
+    out: Set[str] = set()
+    for p in prefixes:
+        out |= csv_match_intertie(csv_ids, p, r1, r2)
     return out
 
 
@@ -402,26 +418,32 @@ def build_desired_ids_from_matrix(
         for r in selected_regions:
             desired |= csv_match_prefix_region(csv_ids, "ELCHRDEM", r)
 
-    # Interties
+    # ---------------- Interties (alias-aware & canonicalized) ----------------
     intertie_pairs = [
         ("AB", "BC"), ("AB", "SK"), ("SK", "MB"),
         ("MB", "ON"), ("ON", "QC"),
         ("NB", "NS"), ("NB", "QC"), ("NB", "PEI"),
-        ("NS", "PEI"), ("LAB", "NS"), ("LAB", "QC"),
+        ("NS", "PEI"), ("NLLAB", "NS"), ("NLLAB", "QC"),
         ("BC", "USA"), ("AB", "USA"), ("SK", "USA"),
         ("MB", "USA"), ("ON", "USA"), ("QC", "USA"), ("NB", "USA"),
     ]
 
+    # Build an alias-aware token set for selected regions
+    selected_tokens: Set[str] = set()
+    for r in selected_regions:
+        selected_tokens.update(region_tokens(r))  # e.g., NLLAB -> {NLLAB, NL, LAB}
+
     for a, b in intertie_pairs:
-        sel_a = a in selected_regions
-        sel_b = b in selected_regions
+        # alias-aware membership
+        sel_a = any(tok in selected_tokens for tok in region_tokens(a))
+        sel_b = any(tok in selected_tokens for tok in region_tokens(b))
 
         if sel_a and sel_b:
-            # Both sides selected -> use EINT only
-            desired |= csv_match_intertie(csv_ids, "ELCHREINT", a, b)
+            # Both sides selected -> endogenous intertie(s)
+            desired |= csv_match_intertie_any(csv_ids, ("ELCHREINT", "EINT"), a, b)
         elif sel_a ^ sel_b:
-            # Exactly one side selected -> use BINT only
-            desired |= csv_match_intertie(csv_ids, "ELCHRBINT", a, b)
+            # Exactly one side selected -> boundary intertie(s)
+            desired |= csv_match_intertie_any(csv_ids, ("ELCHRBINT", "BINT"), a, b)
 
     # AGRI/DIST rules
     if not global_settings.get("power_system_model", False):
@@ -456,10 +478,6 @@ def build_desired_ids_from_matrix(
     if global_settings.get("power_system_model", False):
         desired = {x for x in desired if not x.startswith("AGRIHR")}
 
-    #print(f"[DEBUG] Final desired IDs count: {len(desired)}")
-    for ex in sorted(desired)[:20]:
-        #print(f"[DEBUG]  - {ex}")
-        continue
     return desired
 
 
@@ -478,7 +496,6 @@ def get_demand_lists_region_aware(
     In PSM mode, exclude R_ethos.
     """
     cursor = conn.cursor()
-    #print(f"Using existing connection for {output_db} (power_system_model={power_system_model})")
 
     remove: Set[str] = {'R_ethos'} if power_system_model else set()
     ethos_whitelist = ('E_ethos', 'F_ethos') if power_system_model else ('E_ethos', 'F_ethos', 'R_ethos')
@@ -542,9 +559,6 @@ def get_demand_lists_region_aware(
     com_list = sorted(commodities)
     tech_list = sorted(technologies)
 
-    #print(f"\nFound {len(com_list)} unique commodities.")
-    #print(f"Found {len(tech_list)} unique technologies.")
-
     return com_list, tech_list
 
 
@@ -569,19 +583,31 @@ def table_has_region_column(cursor: sqlite3.Cursor, table: str) -> bool:
 
 
 def delete_rows_not_in_regions(conn: sqlite3.Connection, tables: List[str], allowed_regions: List[str]) -> None:
+    """
+    Robust (alias-aware) region pruning:
+    Keeps any row whose `region` matches any alias token for the allowed regions.
+    """
     if not allowed_regions:
         logger.warning("No allowed regions specified; skipping region pruning.")
         return
 
+    # Build alias-aware token set
+    allowed_tokens: Set[str] = set()
+    for r in allowed_regions:
+        allowed_tokens.update(region_tokens(r))
+        allowed_tokens.add(r)
+
     cur = conn.cursor()
     cur.execute("PRAGMA foreign_keys = OFF;")
 
-    placeholders = ",".join(["?"] * len(allowed_regions))
+    placeholders = ",".join(["?"] * len(allowed_tokens))
+    params = list(allowed_tokens)
+
     for table in tables:
         try:
             if table_has_region_column(cur, table):
-                cur.execute(f"DELETE FROM {table} WHERE region NOT IN ({placeholders});", allowed_regions)
-                logger.debug("Region-pruned table: %s (kept: %s)", table, allowed_regions)
+                cur.execute(f"DELETE FROM {table} WHERE region NOT IN ({placeholders});", params)
+                logger.debug("Region-pruned table: %s (kept tokens: %s)", table, sorted(allowed_tokens))
         except sqlite3.Error as e:
             logger.exception("Skipped region filter for %s: %s", table, e)
             return
@@ -678,10 +704,10 @@ def aggregate_sqlite_files(
 
         output_conn.commit()
 
-        # Region pruning
+        # Region pruning (alias-aware)
         selected_regions = sorted(infer_selected_regions_from_matrix(matrix))
         logger.debug("Selected regions for pruning: %s", selected_regions if selected_regions else "(none)")
-        delete_rows_not_in_regions(output_conn, tables, selected_regions)
+        delete_rows_not_in_regions(output_conn, list(tables), selected_regions)
 
         master_conn.close()
         output_conn.close()
@@ -865,12 +891,47 @@ def main(page: ft.Page) -> None:
         save_config()
 
     def reset_matrix(e: ft.ControlEvent | None = None) -> None:
-        """Reset toggles and rebuild UI."""
+        """Hard reset: turn off PSM, set all cells to 'NA', re-enable controls,
+        clear status text, and overwrite the saved config so the UI won't repopulate."""
+        nonlocal saved_cfg
+    
+        # 1) Reset global flags / checkbox
         global_settings["power_system_model"] = False
         power_system_checkbox.value = False
+    
+        # 2) Reset all dropdowns in the current matrix
+        for (r, s), dd in matrix.items():
+            dd.disabled = False
+            dd.value = "NA"
+    
+        # 3) Clear any status message
+        status_text.value = ""
+    
+        # 4) Overwrite saved config in-memory and on-disk with a clean matrix
+        #    (keep file paths as-is so the user doesn't lose them)
+        saved_cfg = {
+            "input_filename": (in_filename_text_field.value or "").strip(),
+            "output_filename": (out_filename_text_field.value or "").strip(),
+            "power_system_model": False,
+            "matrix": {f"{r}|{s}": "NA" for (r, s) in matrix.keys()},
+        }
+        try:
+            os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+            with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
+                json.dump(saved_cfg, fh, indent=2, ensure_ascii=False)
+            logger.debug("Reset config written to %s", CONFIG_FILE)
+        except Exception as ex:
+            logger.exception("Failed to write reset config: %s", ex)
+    
+        # 5) Rebuild UI and re-apply disabling logic (PSM is off, so all enabled)
         update_ui_matrix()
-        page.update()
-        save_config()
+        apply_dropdown_disabling()
+    
+        # 6) Final paint
+        try:
+            page.update()
+        except Exception:
+            pass
 
     # --- Settings events ---
 
