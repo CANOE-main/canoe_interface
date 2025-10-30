@@ -123,19 +123,16 @@ CONFLICT_SUFFIXES = {
 # Post-Aggregation Filter / Cleanup
 # ------------------------------
 
-def filter_func(output_db: str) -> None:
-    """Run cleanup transformations on the aggregated SQLite file."""
+def filter_func(output_db: str, pinned_techs: Set[str] | None = None) -> None:
+    """Run cleanup transformations on the aggregated SQLite file, never touching pinned techs."""
+    pinned_techs = pinned_techs or set()
     try:
         conn = sqlite3.connect(output_db)
         curs = conn.cursor()
 
-        # Iteratively prune orphan processes/techs
+        # ---- Pass 1: orphan region-tech pruning (skip pinned) ----
         finished = False
         while not finished:
-            regions = [r[0] for r in curs.execute('SELECT region FROM Region').fetchall()]
-            _ = regions  # reserved for future use
-
-            # techs that output a non-demand commodity that isn't consumed anywhere
             bad_rt = curs.execute(
                 """
                 SELECT region, tech 
@@ -146,6 +143,8 @@ def filter_func(output_db: str) -> None:
                   )
                 """
             ).fetchall()
+            # skip pinned techs
+            bad_rt = [rt for rt in bad_rt if rt[1] not in pinned_techs]
 
             tables = [t[0] for t in curs.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()]
 
@@ -153,28 +152,30 @@ def filter_func(output_db: str) -> None:
                 cols = [c[1] for c in curs.execute(f'PRAGMA table_info({table});')]
                 if 'region' in cols and 'tech' in cols:
                     for rt in bad_rt:
+                        if rt[1] in pinned_techs:
+                            continue
                         curs.execute(f"DELETE FROM {table} WHERE region == ? AND tech == ?", (rt[0], rt[1]))
 
             tech_remaining = {t[0] for t in curs.execute('SELECT DISTINCT tech FROM Efficiency').fetchall()}
             tech_before = {t[0] for t in curs.execute('SELECT DISTINCT tech FROM Technology').fetchall()}
-            tech_gone = tech_before - tech_remaining
+            tech_gone = (tech_before - tech_remaining) - pinned_techs  # never remove pinned
 
             for table in tables:
                 cols = [c[1] for c in curs.execute(f'PRAGMA table_info({table});')]
                 if 'tech' in cols:
                     for tech in tech_gone:
+                        if tech in pinned_techs:
+                            continue
                         curs.execute(f'DELETE FROM {table} WHERE tech == ?', (tech,))
 
-            logger.debug("Pruned %d orphan region-tech pairs, %d orphan techs", len(bad_rt), len(tech_gone))
+            logger.debug("Pruned %d orphan region-tech pairs, %d orphan techs (pinned respected)", len(bad_rt), len(tech_gone))
             finished = len(bad_rt) == 0
 
-        # Timing-based pruning
+        # ---- Pass 2: timing pruning (skip pinned) ----
         finished = False
         while not finished:
-            # Time horizon (exclude final marker period)
             time_all = [p[0] for p in curs.execute('SELECT period FROM TimePeriod').fetchall()][:-1]
 
-            # Build lifetimes map with sensible defaults
             lifetime_process = {}
             for r, t, v in curs.execute('SELECT region, tech, vintage FROM Efficiency').fetchall():
                 lifetime_process[(r, t, v)] = 40
@@ -184,38 +185,36 @@ def filter_func(output_db: str) -> None:
             for r, t, v, lp in curs.execute('SELECT region, tech, vintage, lifetime FROM LifetimeProcess').fetchall():
                 lifetime_process[(r, t, v)] = lp
 
-            # Get the efficiency table
             df_eff = pd.read_sql_query('SELECT * FROM Efficiency', conn)
-            
             if df_eff.empty:
                 logger.debug("Timing pruning skipped: Efficiency table is empty.")
                 finished = True
                 continue
 
-            # Last period each process is producing its output commodity
             df_eff['last_out'] = df_eff['vintage'] + [int(lifetime_process[tuple(rtv)]) for rtv in df_eff[['region','tech','vintage']].values]
-            df_eff['last_out'] = [min(2050,5*((p-1) // 5)) for p in df_eff['last_out']]
+            df_eff['last_out'] = [min(2050, 5 * ((p - 1) // 5)) for p in df_eff['last_out']]
 
-            # Last period each commodity is consumed in each region
             df_last_in = df_eff.groupby(['region','input_comm'])['last_out'].max()
             demand_comms = [c[0] for c in curs.execute("SELECT name FROM Commodity WHERE flag == 'd'").fetchall()]
             df_eff = df_eff.loc[~df_eff['output_comm'].isin(demand_comms)]
-            
+
             if df_eff.empty:
                 logger.debug("Timing pruning skipped: No non-demand outputs found.")
                 finished = True
                 continue
 
-            # Handle missing 'last_in' values for outputs that are never consumed
             df_eff = df_eff.merge(df_last_in.rename('last_in'), left_on=['region', 'output_comm'], right_index=True, how='left')
-            # If an output is never an input, 'last_in' will be NaN. Treat this as 0 (it's never consumed).
             df_eff['last_in'] = df_eff['last_in'].fillna(0)
 
-            # Remove any processes that are producing their output comm after anything is consuming it
             df_remove = df_eff.loc[df_eff['last_in'] < df_eff['last_out']]
-            bad_ritvo = df_remove[['region','input_comm','tech','vintage','output_comm']].values
+            # Don't remove pinned techs
+            if not pinned_techs:
+                bad_rows = df_remove[['region','input_comm','tech','vintage','output_comm']].values
+            else:
+                df_remove = df_remove[~df_remove['tech'].isin(pinned_techs)]
+                bad_rows = df_remove[['region','input_comm','tech','vintage','output_comm']].values
 
-            for region, input_comm, tech, vintage, output_comm in bad_ritvo:
+            for region, input_comm, tech, vintage, output_comm in bad_rows:
                 curs.execute(
                     """
                     DELETE FROM Efficiency 
@@ -229,15 +228,15 @@ def filter_func(output_db: str) -> None:
                         (region, tech, vintage),
                     )
 
-            logger.debug("Pruned %d timing-infeasible Efficiency rows", len(df_remove))
-            finished = len(df_remove) == 0
+            logger.debug("Pruned %d timing-infeasible Efficiency rows (pinned respected)", len(bad_rows))
+            finished = len(bad_rows) == 0
 
         conn.commit()
         conn.close()
         logger.debug("filter_func completed for %s", output_db)
     except Exception as e:
         logger.exception("filter_func failed for %s: %s", output_db, e)
-        # don't re-raise here; best-effort cleanup
+
 
 
 # ------------------------------
@@ -310,6 +309,31 @@ def csv_match_intertie_any(csv_ids: Iterable[str], prefixes: Iterable[str], r1: 
 # ------------------------------
 # CSV Loader
 # ------------------------------
+
+def collect_db_data_ids(db_path: str) -> Set[str]:
+    """
+    Scan the input SQLite and return all distinct data_id values that exist
+    (across every table that has a 'data_id' column).
+    """
+    ids: Set[str] = set()
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = [t[0] for t in cur.fetchall()]
+        for t in tables:
+            try:
+                cols = [c[1] for c in cur.execute(f'PRAGMA table_info({t});')]
+                if 'data_id' in cols:
+                    cur.execute(f"SELECT DISTINCT data_id FROM {t}")
+                    ids.update(r[0] for r in cur.fetchall() if r and r[0] is not None)
+            except sqlite3.Error:
+                continue
+        conn.close()
+    except Exception as e:
+        logger.exception("collect_db_data_ids failed for %s: %s", db_path, e)
+    return ids
+
 
 def get_data_ids_from_csv(file_path: str) -> List[str]:
     if not os.path.exists(file_path):
@@ -608,10 +632,17 @@ def table_has_region_column(cursor: sqlite3.Cursor, table: str) -> bool:
     return "region" in cols
 
 
-def delete_rows_not_in_regions(conn: sqlite3.Connection, tables: List[str], allowed_regions: List[str]) -> None:
+def delete_rows_not_in_regions(
+    conn: sqlite3.Connection,
+    tables: List[str],
+    allowed_regions: List[str]
+) -> None:
     """
-    Robust (alias-aware) region pruning:
+    Alias-aware region pruning, but NEVER remove rows tied to pinned ids/techs.
     Keeps any row whose `region` matches any alias token for the allowed regions.
+    Pinned guards:
+      - if table has data_id: keep rows whose data_id is in PinnedDataIDs
+      - if table has tech:    keep rows whose tech    is in PinnedTechs
     """
     if not allowed_regions:
         logger.warning("No allowed regions specified; skipping region pruning.")
@@ -625,20 +656,37 @@ def delete_rows_not_in_regions(conn: sqlite3.Connection, tables: List[str], allo
 
     cur = conn.cursor()
     cur.execute("PRAGMA foreign_keys = OFF;")
-
     placeholders = ",".join(["?"] * len(allowed_tokens))
     params = list(allowed_tokens)
 
     for table in tables:
         try:
-            if table_has_region_column(cur, table):
-                cur.execute(f"DELETE FROM {table} WHERE region NOT IN ({placeholders});", params)
-                logger.debug("Region-pruned table: %s (kept tokens: %s)", table, sorted(allowed_tokens))
+            cur.execute(f"PRAGMA table_info({table});")
+            cols = [row[1] for row in cur.fetchall()]
+            if "region" not in cols:
+                continue
+
+            has_data_id = "data_id" in cols
+            has_tech = "tech" in cols
+
+            guard_sql = ""
+            if has_data_id and has_tech:
+                guard_sql = " AND data_id NOT IN (SELECT data_id FROM PinnedDataIDs) AND tech NOT IN (SELECT tech FROM PinnedTechs)"
+            elif has_data_id:
+                guard_sql = " AND data_id NOT IN (SELECT data_id FROM PinnedDataIDs)"
+            elif has_tech:
+                guard_sql = " AND tech NOT IN (SELECT tech FROM PinnedTechs)"
+
+            sql = f"DELETE FROM {table} WHERE region NOT IN ({placeholders}){guard_sql};"
+            cur.execute(sql, params)
+            logger.debug("Region-pruned table: %s (kept tokens: %s)", table, sorted(allowed_tokens))
         except sqlite3.Error as e:
             logger.exception("Skipped region filter for %s: %s", table, e)
             return
+
     conn.commit()
     cur.execute("PRAGMA foreign_keys = ON;")
+
 
 
 # ------------------------------
@@ -647,21 +695,33 @@ def delete_rows_not_in_regions(conn: sqlite3.Connection, tables: List[str], allo
 
 def aggregate_sqlite_files(
     matrix: Dict[Tuple[str, str], ft.Dropdown],
-    csv_ids: Set[str],
-    global_settings: Dict[str, Any], # Holds scenario (str) and psm (bool)
+    csv_ids: Set[str],  # kept in signature for compatibility; we will ignore it
+    global_settings: Dict[str, Any],
     get_current_regions,
     output_filename: str,
     input_filename: str,
 ) -> None:
     try:
-        desired_ids = build_desired_ids_from_matrix(matrix, csv_ids, global_settings, get_current_regions)
+        # (A) Build from what's ACTUALLY in the input DB
+        available_ids = collect_db_data_ids(input_filename)
+        if not available_ids:
+            raise RuntimeError("No data_id values found in the input database.")
+
+        # Use DB ids as the universe for matching
+        desired_ids = build_desired_ids_from_matrix(
+            matrix=matrix,
+            csv_ids=available_ids,  # reusing parameter name; we pass DB ids
+            global_settings=global_settings,
+            get_current_regions=get_current_regions,
+        )
         if not desired_ids:
             logger.info("No matching IDs found; skipping aggregation")
             return
 
-        selected_data_ids = sorted(desired_ids)
+        # Only keep ids that do exist in the DB (should already be true)
+        selected_data_ids = sorted(desired_ids & available_ids)
         id_str = "('" + "', '".join(selected_data_ids) + "')"
-        logger.debug("Selected IDs count: %d", len(selected_data_ids))
+        logger.debug("Selected IDs (pinned) count: %d", len(selected_data_ids))
 
         master_db_path = input_filename
         output_db = output_filename
@@ -685,14 +745,15 @@ def aggregate_sqlite_files(
         master_cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
         tables = {t[0] for t in master_cursor.fetchall()}
 
-        # Basic index tables that should be filled in schema or are dataset-only
+        # index-only tables handled by schema or labels
         tables -= {
             'CommodityType', 'Operator', 'TechnologyType', 'TimePeriodType',
             'DataQualityCredibility', 'DataQualityDataQualityGeography',
             'DataQualityStructure', 'DataQualityTechnology', 'DataQualityTime',
             'TechnologyLabel', 'CommodityLabel', 'DataSourceLabel'
         }
-            
+
+        # Copy (filter by data_id when present)
         output_cursor.execute('PRAGMA foreign_keys = OFF;')
         for table in tables:
             try:
@@ -710,41 +771,96 @@ def aggregate_sqlite_files(
                 output_conn.commit()
             except sqlite3.Error as e:
                 logger.exception("SQLite error copying table %s: %s", table, e)
-                # continue to next table to attempt best-effort aggregation
                 continue
 
-        # Demand-led pruning
-        # RE-ADDED: Pass power_system_model flag
+        # (B) Create PIN tables to protect selected rows through ALL pruning
+        output_cursor.executescript("""
+        CREATE TABLE IF NOT EXISTS PinnedDataIDs(data_id TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS PinnedTechs(tech TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS PinnedComms(name TEXT PRIMARY KEY);
+        """)
+        output_cursor.executemany(
+            "INSERT OR IGNORE INTO PinnedDataIDs(data_id) VALUES (?)",
+            [(i,) for i in selected_data_ids]
+        )
+        # Pinned techs derived from Technology rows carrying pinned data_id
+        output_cursor.execute("""
+            INSERT OR IGNORE INTO PinnedTechs(tech)
+            SELECT DISTINCT tech FROM Technology WHERE data_id IN (SELECT data_id FROM PinnedDataIDs)
+        """)
+        # Pinned commodities connected to pinned techs
+        output_cursor.execute("""
+            INSERT OR IGNORE INTO PinnedComms(name)
+            SELECT DISTINCT input_comm FROM Efficiency WHERE tech IN (SELECT tech FROM PinnedTechs)
+            UNION
+            SELECT DISTINCT output_comm FROM Efficiency WHERE tech IN (SELECT tech FROM PinnedTechs)
+            UNION
+            SELECT DISTINCT emis_comm FROM EmissionActivity WHERE tech IN (SELECT tech FROM PinnedTechs)
+        """)
+        output_conn.commit()
+
+        # (C) Demand-led pruning (but never remove pinned ids/techs/comms)
         com_list, tech_list = get_demand_lists_region_aware(
             output_db, output_conn, power_system_model=global_settings.get("power_system_model", False)
         )
+
         if tech_list:
             tech_str = "('" + "', '".join(tech_list) + "')"
-            output_cursor.execute(f'DELETE FROM Efficiency WHERE tech NOT IN {tech_str}')
-            output_cursor.execute(f'DELETE FROM Technology WHERE tech NOT IN {tech_str}')
-            output_cursor.execute(f'DELETE FROM LifetimeTech WHERE tech NOT IN {tech_str}')
-            output_cursor.execute(f'DELETE FROM CostVariable WHERE tech NOT IN {tech_str}')
-            output_cursor.execute(f'DELETE FROM EmissionActivity WHERE tech NOT IN {tech_str}')
+            output_cursor.execute(f'''
+                DELETE FROM Efficiency 
+                WHERE tech NOT IN {tech_str}
+                  AND tech NOT IN (SELECT tech FROM PinnedTechs)
+            ''')
+            output_cursor.execute(f'''
+                DELETE FROM Technology 
+                WHERE tech NOT IN {tech_str}
+                  AND tech NOT IN (SELECT tech FROM PinnedTechs)
+            ''')
+            output_cursor.execute(f'''
+                DELETE FROM LifetimeTech 
+                WHERE tech NOT IN {tech_str}
+                  AND tech NOT IN (SELECT tech FROM PinnedTechs)
+            ''')
+            output_cursor.execute(f'''
+                DELETE FROM CostVariable 
+                WHERE tech NOT IN {tech_str}
+                  AND tech NOT IN (SELECT tech FROM PinnedTechs)
+            ''')
+            output_cursor.execute(f'''
+                DELETE FROM EmissionActivity 
+                WHERE tech NOT IN {tech_str}
+                  AND tech NOT IN (SELECT tech FROM PinnedTechs)
+            ''')
+
         if com_list:
             com_str = "('" + "', '".join(com_list) + "')"
-            output_cursor.execute(f'DELETE FROM Commodity WHERE name NOT IN {com_str}')
+            output_cursor.execute(f'''
+                DELETE FROM Commodity 
+                WHERE name NOT IN {com_str}
+                  AND name NOT IN (SELECT name FROM PinnedComms)
+            ''')
 
         output_conn.commit()
 
-        # Region pruning (alias-aware)
+        # (D) Region pruning (alias-aware, with pin guards)
         selected_regions = sorted(infer_selected_regions_from_matrix(matrix))
         logger.debug("Selected regions for pruning: %s", selected_regions if selected_regions else "(none)")
         delete_rows_not_in_regions(output_conn, list(tables), selected_regions)
 
+        # Capture pinned techs for the final pass
+        output_cursor.execute("SELECT tech FROM PinnedTechs")
+        pinned_techs = {r[0] for r in output_cursor.fetchall()}
+
         master_conn.close()
         output_conn.close()
 
-        # Final post-aggregation cleanup
-        filter_func(output_db)
+        # (E) Final post-aggregation cleanup — respect pinned techs
+        filter_func(output_db, pinned_techs)
         logger.info("Aggregation complete. Output: %s", output_db)
     except Exception as e:
         logger.exception("Unhandled error during aggregation (input=%s output=%s): %s", input_filename, output_filename, e)
         raise
+
 
 
 # ------------------------------
@@ -1027,18 +1143,13 @@ def main(page: ft.Page) -> None:
             page.update()
             return
 
-        csv_ids = set(get_data_ids_from_csv(DATASETS_CSV))
-        if not csv_ids:
-            status_text.value = f"Error: No data_ids found in {DATASETS_CSV}"
-            page.update()
-            return
-
         try:
             # persist current config before running
             save_config()
+            # NOTE: csv_ids parameter is ignored now; keep an empty set for signature compatibility
             aggregate_sqlite_files(
                 matrix=matrix,
-                csv_ids=csv_ids,
+                csv_ids=set(),
                 global_settings=global_settings,
                 get_current_regions=get_current_regions,
                 input_filename=input_filename,
@@ -1050,6 +1161,7 @@ def main(page: ft.Page) -> None:
             logger.exception("Aggregation failed (input=%s output=%s): %s", input_filename, output_filename, ex)
             status_text.value = f"Error: {ex}"
         page.update()
+
 
     # --- Build initial matrix UI (all regions from the start) ---
     header_row = [ft.Text("Region/Sector", weight=ft.FontWeight.BOLD, width=120)] + [
