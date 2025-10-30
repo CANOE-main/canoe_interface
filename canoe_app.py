@@ -111,17 +111,180 @@ REGION_ALIASES = {
     "NLLAB": ["NLLAB", "NL", "LAB"],
     "USA": ["USA"],
 }
+KNOWN_REGION_CODES = {
+    "AB","BC","MB","SK","ON","QC","NB","NS","PEI","PE","NLLAB","NL","LAB",
+    "CAN","USA","ROW"
+}
 
+ALIAS_MAP = {
+    "PE": "PEI",
+    "NL": "NLLAB",
+    "LAB": "NLLAB",
+}
+
+def canon_region(code: str) -> str:
+    c = (code or "").upper()
+    return ALIAS_MAP.get(c, c)
+
+def collect_known_codes_from_db(conn: sqlite3.Connection) -> set[str]:
+    """
+    Augment KNOWN_REGION_CODES using distinct region values from any table that has a 'region' column,
+    and using intertie tech tokens if present.
+    """
+    cur = conn.cursor()
+    codes = set(KNOWN_REGION_CODES)
+    try:
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = [t[0] for t in cur.fetchall()]
+        for t in tables:
+            try:
+                cols = [c[1] for c in cur.execute(f"PRAGMA table_info({t});")]
+                if "region" in cols:
+                    cur.execute(f"SELECT DISTINCT region FROM {t} WHERE region IS NOT NULL;")
+                    for (r,) in cur.fetchall():
+                        if r:
+                            codes.add(canon_region(str(r)))
+            except sqlite3.Error:
+                pass
+
+        # Try to learn codes from tech strings like EINTABBC / BINTABUSA
+        try:
+            cur.execute("SELECT DISTINCT tech FROM Technology WHERE tech LIKE 'EINT%' OR tech LIKE 'BINT%';")
+            for (tech,) in cur.fetchall():
+                rest = tech[4:]
+                for k in sorted({*codes}, key=len, reverse=True):
+                    if rest.startswith(k):
+                        codes.add(canon_region(k))
+                        second = rest[len(k):]
+                        for k2 in sorted({*codes}, key=len, reverse=True):
+                            if second.startswith(k2):
+                                codes.add(canon_region(k2))
+                                break
+                        break
+        except sqlite3.Error:
+            pass
+    except Exception:
+        pass
+    return {canon_region(c) for c in codes}
 ALL_ALIAS_TOKENS = sorted(
     {tok for toks in REGION_ALIASES.values() for tok in toks}, key=len, reverse=True
 )
 CONFLICT_SUFFIXES = {
     t: [u for u in ALL_ALIAS_TOKENS if u != t and u.endswith(t)] for t in ALL_ALIAS_TOKENS
 }
+def split_intertie_tech(tech: str, codes: set[str]) -> tuple[str,str,str] | None:
+    """
+    Parse tech names like 'EINTABBC', 'BINTABUSA', returning (kind, origin, dest)
+    where origin/dest are canonical region codes. Returns None if not an intertie.
+    """
+    if not tech or len(tech) < 9:
+        return None
+    kind = tech[:4]
+    if kind not in ("EINT", "BINT"):
+        return None
+    rest = tech[4:].upper()
 
+    # longest-match split to handle variable-length codes (e.g., PEI, NLLAB)
+    first = None
+    for c in sorted(codes, key=len, reverse=True):
+        if rest.startswith(c):
+            first = c
+            break
+    if not first:
+        return None
+    second_raw = rest[len(first):]
+    second = None
+    for c in sorted(codes, key=len, reverse=True):
+        if second_raw.startswith(c):
+            second = c
+            break
+    if not second:
+        return None
+    return kind, canon_region(first), canon_region(second)
 # ------------------------------
 # Post-Aggregation Filter / Cleanup
 # ------------------------------
+def prune_unrequested_interties(conn: sqlite3.Connection, selected_regions: list[str]) -> None:
+    """
+    Remove intertie technologies (and their rows in related tables) that *originate* in
+    unselected regions. Rules:
+      - EINT (endogenous): keep only if BOTH origin and dest are selected (keep both directions).
+      - BINT (boundary): keep only if ORIGIN is selected (dest may be unselected like USA/SK/etc).
+    Everything else is dropped.
+    """
+    sel = {canon_region(r) for r in (selected_regions or [])}
+    cur = conn.cursor()
+
+    # Build region code universe (handles PE->PEI, NL/LAB->NLLAB, etc.)
+    codes = collect_known_codes_from_db(conn)
+
+    # Find all intertie techs
+    try:
+        cur.execute("SELECT DISTINCT tech FROM Technology WHERE tech LIKE 'EINT%' OR tech LIKE 'BINT%';")
+        techs = [t[0] for t in cur.fetchall()]
+    except sqlite3.Error:
+        techs = []
+
+    drop_set: set[str] = set()
+    keep_set: set[str] = set()
+
+    for t in techs:
+        parsed = split_intertie_tech(t, codes)
+        if not parsed:
+            continue
+        kind, origin, dest = parsed
+
+        if kind == "EINT":
+            # Keep iff BOTH selected; keep both directions naturally
+            if origin in sel and dest in sel:
+                keep_set.add(t)
+            else:
+                drop_set.add(t)
+        else:  # BINT
+            # Keep iff ORIGIN is selected (dest can be anything)
+            if origin in sel:
+                keep_set.add(t)
+            else:
+                drop_set.add(t)
+
+    # Nothing to do?
+    if not drop_set:
+        return
+
+    # Identify all tables with a 'tech' column
+    try:
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = [t[0] for t in cur.fetchall()]
+    except sqlite3.Error:
+        tables = []
+
+    tech_tables = []
+    for t in tables:
+        try:
+            cols = [c[1] for c in cur.execute(f"PRAGMA table_info({t});")]
+            if "tech" in cols:
+                tech_tables.append(t)
+        except sqlite3.Error:
+            pass
+
+    # Delete in all tech tables (before creating pins)
+    cur.execute("PRAGMA foreign_keys = OFF;")
+    placeholders = ",".join("?" for _ in drop_set)
+    params = list(drop_set)
+
+    for t in tech_tables:
+        try:
+            cur.execute(f"DELETE FROM {t} WHERE tech IN ({placeholders});", params)
+        except sqlite3.Error:
+            pass
+
+    # Also remove any orphan Technology rows in case Technology didn't have 'tech' (it does, but be safe)
+    try:
+        cur.execute(f"DELETE FROM Technology WHERE tech IN ({placeholders});", params)
+    except sqlite3.Error:
+        pass
+
+    conn.commit()
 
 def filter_func(output_db: str, pinned_techs: Set[str] | None = None) -> None:
     """Run cleanup transformations on the aggregated SQLite file, never touching pinned techs."""
@@ -798,7 +961,8 @@ def aggregate_sqlite_files(
             SELECT DISTINCT emis_comm FROM EmissionActivity WHERE tech IN (SELECT tech FROM PinnedTechs)
         """)
         output_conn.commit()
-
+        selected_regions = sorted(infer_selected_regions_from_matrix(matrix))
+        prune_unrequested_interties(output_conn, selected_regions)
         # (C) Demand-led pruning (but never remove pinned ids/techs/comms)
         com_list, tech_list = get_demand_lists_region_aware(
             output_db, output_conn, power_system_model=global_settings.get("power_system_model", False)
