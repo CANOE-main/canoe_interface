@@ -631,7 +631,7 @@ def aggregate_sqlite_files(
         raise RuntimeError(f"Unhandled error during aggregation: {e}")
 
 # ------------------------------
-# Flet UI (layout preserved; CCS removed)
+# Flet UI
 # ------------------------------
 
 def main(page: ft.Page) -> None:
@@ -925,35 +925,44 @@ def main(page: ft.Page) -> None:
     )
 
     # Main content layout (structure/spacing preserved)
-    global main_content
+    middle_row = ft.Row(
+        [
+            ft.Column(
+                matrix_rows,
+                expand=True,                      # take remaining width in the row
+                scroll=ft.ScrollMode.ADAPTIVE,    # or ALWAYS
+                # remove fixed height here
+                horizontal_alignment=ft.CrossAxisAlignment.START,
+            ),
+            ft.VerticalDivider(),
+            settings_column,  # give this a fixed width internally if needed
+        ],
+        expand=True,  # <-- this row grows vertically to fill space
+        alignment=ft.MainAxisAlignment.CENTER,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+    )
+
+    footer = ft.Container(
+        height=50,  # <-- fixed footer height
+        content=ft.Row(
+            [in_filename_text_field, out_filename_text_field, submit_button, status_text],
+            alignment=ft.MainAxisAlignment.CENTER,
+            spacing=30,
+        ),
+        alignment=ft.alignment.center,
+    )
+
     main_content = ft.Column(
         [
             image,
             ft.Text("CANOE UI", size=24, weight=ft.FontWeight.BOLD),
             ft.Text("Read accompanying document for details about choices and instructions", size=18),
             ft.Divider(),
-            ft.Row(
-                [
-                    ft.Column(
-                        matrix_rows,
-                        scroll=ft.ScrollMode.ADAPTIVE,
-                        height=400,
-                        width=700,
-                        horizontal_alignment=ft.CrossAxisAlignment.START,
-                    ),
-                    ft.VerticalDivider(),
-                    settings_column,
-                ],
-                alignment=ft.MainAxisAlignment.CENTER,
-                vertical_alignment=ft.MainAxisAlignment.START,
-            ),
+            middle_row,  # expands
             ft.Divider(),
-            ft.Row(
-                [in_filename_text_field, out_filename_text_field, submit_button, status_text],
-                alignment=ft.MainAxisAlignment.CENTER,
-                spacing=30,
-            ),
+            footer,      # fixed height
         ],
+        expand=True,  # <-- make the whole layout fill the window
         alignment=ft.MainAxisAlignment.START,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         spacing=10,
