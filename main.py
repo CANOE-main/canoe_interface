@@ -35,7 +35,7 @@ logger = setup_logging("main")
 # Helpers
 #########################################
 
-# SECTVARR1R2001
+# SECTVARR1R2
 def make_id(
     sector: Sector,
     variant: Variant,
@@ -324,10 +324,11 @@ def main(page: ft.Page) -> None:
                             continue
                         dd.value = Level.EXCLUDED.value
                 else:
-                    # if row is active cant have an inactive sector
+                    # if demand is active in this region cant have an inactive demand sector
                     row_is_active = any(
-                        (matrix.get((r, _s)) and matrix[(r, _s)].value != Level.EXCLUDED.value)
-                        for _s in TABLE_SECTORS
+                        (matrix.get((r, _s))
+                        and matrix[(r, _s)].value != Level.EXCLUDED.value)
+                        for _s in TABLE_SECTORS if _s != Sector.ELECTRICITY.value
                     )
                     if row_is_active:
                         e.control.value = Level.LOW_RESOLUTION.value
@@ -341,7 +342,7 @@ def main(page: ft.Page) -> None:
                         continue
 
                     if _s != Sector.ELECTRICITY.value and dd.value == Level.EXCLUDED.value:
-                        dd.value = Level.LOW_RESOLUTION.value
+                        dd.value = e.control.value
                     elif _s == Sector.ELECTRICITY.value and dd.value == Level.EXCLUDED.value:
                         dd.value = Level.HIGH_RESOLUTION.value
         
@@ -451,7 +452,7 @@ def main(page: ft.Page) -> None:
             logger.info("Aggregation finished successfully (input=%s output=%s)", input_filename, output_filename)
         except Exception as ex:
             logger.exception("Aggregation failed (input=%s output=%s): %s", input_filename, output_filename, ex)
-            status_text.value = f"Error: {ex}"
+            status_text.value = f"Error processing database. Check log file."
             
         page.update()
 
@@ -460,7 +461,7 @@ def main(page: ft.Page) -> None:
     header_row = [ft.Text("Region/Sector", weight=ft.FontWeight.BOLD, width=120)] + [
         ft.Text(s, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER, width=80) for s in TABLE_SECTORS
     ]
-    matrix_rows = [ft.Row(header_row, alignment=ft.MainAxisAlignment.START)]
+    matrix_rows = [ft.Row(header_row, alignment=ft.MainAxisAlignment.CENTER)]
 
     for region in TABLE_REGIONS:
         row_elements = [ft.Text(region, weight=ft.FontWeight.BOLD, width=120)]
@@ -496,7 +497,7 @@ def main(page: ft.Page) -> None:
             row_elements.append(dd)
             dd.data = (region, sector)
             dd.on_change = on_sector_dropdown_change
-        matrix_rows.append(ft.Row(row_elements, alignment=ft.MainAxisAlignment.START))
+        matrix_rows.append(ft.Row(row_elements, alignment=ft.MainAxisAlignment.CENTER))
 
     # Apply saved text inputs / controls if present
     try:
