@@ -28,7 +28,7 @@ def snap5_max2050(year: int):
     """
     Snap year to nearest prior 5-year period, max 2050
     """
-    return min(2050, (year // 5) * 5)
+    return min(2050, ((year-1) // 5) * 5)
 
 #########################################
 # Initialisation
