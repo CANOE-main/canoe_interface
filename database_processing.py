@@ -105,10 +105,10 @@ def get_latest_data_ids(
     From a set of data IDs without versions, get the latest versioned IDs available in the input DB
     """
     viable_ids = get_viable_data_ids(input_filename, desired_ids)
-    latest_ids = set(
+    latest_ids = sorted(set(
         collect_latest_id(input_filename, base_id)
         for base_id in viable_ids
-    )
+    ))
     logger.debug("Transferring the following data_IDs: %s", latest_ids)
     return latest_ids
 
@@ -146,9 +146,11 @@ def aggregate_sqlite_files(
       4) Final cleanup post_process
     """
     try:
+        cmd: str = None # initialise for error logging if needed
+
         # 1) Get viable data IDs to transfer
         data_ids = get_latest_data_ids(input_filename, desired_ids)
-
+        
         # 2) Initialise database connections
         conn, curs = initialize_output_database(output_filename)
         conn.execute(f'ATTACH "{input_filename}" AS dataset')
@@ -158,15 +160,19 @@ def aggregate_sqlite_files(
         curs.execute('SELECT name FROM dataset.sqlite_master WHERE type="table";')
         tables = {t[0] for t in curs.fetchall()}
         tables -= INDEX_TABLES # exclude label/index-only tables handled by schema
-
+        tables = sorted(tables)
+        
+        logger.debug("Executing SQLite transfers:")
         for t in tables:
             cols = [c[1] for c in curs.execute(f"PRAGMA dataset.table_info({t});")]
             if 'data_id' in cols:
                 for data_id in data_ids:
-                    curs.execute(f"INSERT INTO {t} SELECT * FROM dataset.{t} WHERE data_id == '{data_id}';")
+                    cmd = f"INSERT OR IGNORE INTO {t} SELECT * FROM dataset.{t} WHERE data_id == '{data_id}';"
+                    curs.execute(cmd)
                     conn.commit()
             else:
-                curs.execute(f"INSERT INTO {t} SELECT * FROM dataset.{t};")
+                cmd = f"INSERT OR IGNORE INTO {t} SELECT * FROM dataset.{t};"
+                curs.execute(cmd)
                 conn.commit()
 
         conn.execute("PRAGMA foreign_keys = ON;")
@@ -179,6 +185,8 @@ def aggregate_sqlite_files(
 
     except Exception as e:
         logger.exception("Unhandled error during aggregation (input=%s output=%s): %s", input_filename, output_filename, e)
+        if cmd:
+            logger.debug("Last SQLite command: %s", cmd)
         raise RuntimeError(f"Unhandled error during aggregation: {e}")
     
 #########################################
@@ -199,7 +207,7 @@ def post_process(output_filename: str) -> None:
 
         curs.execute("PRAGMA foreign_keys = OFF;")
 
-        # ---- Pass 1: orphan region-tech pruning ----
+        # ---- Pass 1: Remove supply orphans by region (lifetime naive) ----
         for iter in range(MAX_ITERS):
 
             bad_rt = curs.execute(
@@ -216,6 +224,11 @@ def post_process(output_filename: str) -> None:
                     iter
                 )
                 break
+            else:
+                logger.debug(
+                    "Removing the following region-tech orphans: %s",
+                    bad_rt
+                )
 
             deleted_total = 0
             tables = [t[0] for t in curs.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()]
@@ -234,6 +247,10 @@ def post_process(output_filename: str) -> None:
             tech_before    = {t[0] for t in curs.execute('SELECT DISTINCT tech FROM Technology').fetchall()}
             tech_gone = tech_before - tech_remaining
             if tech_gone:
+                logger.debug(
+                    "Removing the following orphan techs: %s",
+                    tech_gone
+                )
                 for table in tables:
                     cols = [c[1] for c in curs.execute(f'PRAGMA table_info({table});')]
                     if 'tech' in cols:
@@ -244,7 +261,7 @@ def post_process(output_filename: str) -> None:
                                     deleted_total += curs.rowcount
                             except sqlite3.Error:
                                 pass
-
+                
             conn.commit()
             if deleted_total == 0:
                 logger.debug(
@@ -253,7 +270,7 @@ def post_process(output_filename: str) -> None:
                 )
                 break
 
-        # ---- Pass 2: timing pruning ----
+        # ---- Pass 2: Remove supply orphans due to lifetime pruning ----
         for iter in range(MAX_ITERS):
 
             time_all = [int(p[0]) for p in curs.execute('SELECT period FROM TimePeriod').fetchall()]
@@ -274,24 +291,31 @@ def post_process(output_filename: str) -> None:
             df_eff['vintage'] = pd.to_numeric(df_eff['vintage'], errors='coerce').fillna(0).astype(int)
 
             df_eff['last_out'] = [
-                snap5_max2050(v + int(lifetime_process.get((r, t, v), LTT_DEFAULT)))
+                snap5_max2050(v + int(lifetime_process[r, t, v]))
                 for r, t, v in df_eff[['region','tech','vintage']].itertuples(index=False, name=None)
             ]
-            demand_comms = {c[0] for c in curs.execute("SELECT name FROM Commodity WHERE flag = 'd'").fetchall()}
-            df_nd = df_eff.loc[~df_eff['output_comm'].isin(demand_comms)].copy()
 
             df_last_in = df_eff.groupby(['region','input_comm'], as_index=True)['last_out'].max().rename('last_in')
-            df_nd = df_nd.merge(df_last_in, left_on=['region','output_comm'], right_index=True, how='left')
-            df_nd['last_in'] = pd.to_numeric(df_nd['last_in'], errors='coerce').fillna(0).astype(int)
+            df_eff = df_eff.merge(df_last_in, left_on=['region','output_comm'], right_index=True, how='left')
+            df_eff['last_in'] = pd.to_numeric(df_eff['last_in'], errors='coerce').fillna(0).astype(int)
 
-            df_remove = df_nd.loc[df_nd['last_in'] < df_nd['last_out']].copy()
-            ritvo_remove = df_remove[['region','input_comm','tech','vintage','output_comm']].itertuples(index=False, name=None)
+            demand_comms = {c[0] for c in curs.execute("SELECT name FROM Commodity WHERE flag = 'd'").fetchall()}
+            df_eff = df_eff.loc[~df_eff['output_comm'].isin(demand_comms)].copy()
+            
+            df_remove = df_eff.loc[df_eff['last_in'] < df_eff['last_out']].copy()
+            ritvo_remove = list(df_remove[['region','input_comm','tech','vintage','output_comm']].itertuples(index=False, name=None))
+
+            if ritvo_remove:
+                logger.debug(
+                    "Removing the following ritvo orphans: %s",
+                    ritvo_remove
+                )
 
             deleted_total = 0
             for region, input_comm, tech, vintage, output_comm in ritvo_remove:
                 curs.execute(
                     """
-                    DELETE FROM Efficiency 
+                    DELETE FROM Efficiency
                     WHERE region = ? AND input_comm = ? AND tech = ?
                         AND CAST(vintage AS INTEGER) = ?
                         AND output_comm = ?
@@ -307,8 +331,20 @@ def post_process(output_filename: str) -> None:
 
             conn.commit()
             if deleted_total == 0:
-                logger.debug("Lifetime-naive supply-side orphan removal complete after %d iterations.", iter)
+                logger.debug(
+                    "Lifetime-aware supply-side orphan removal complete after %d iterations.",
+                    iter
+                )
                 break
+
+        # Delete any unused commodities (techs already cleaned up)
+        curs.execute(
+            "DELETE FROM Commodity "
+            "WHERE flag != 'e' "
+                "AND name NOT IN (SELECT DISTINCT input_comm FROM Efficiency) "
+                "AND name NOT IN (SELECT DISTINCT output_comm FROM Efficiency)"
+        )
+        conn.commit()
 
         curs.execute("PRAGMA foreign_keys = ON;")
 
