@@ -8,6 +8,7 @@ For readability, maintainability, and to reduce typos.
 #########################################
 
 from enum import Enum
+from typing import Set, List
 
 class SortableEnum(Enum):
     """
@@ -76,19 +77,19 @@ class Level(SortableEnum):
 #   UI constants
 #########################################
 
-CONFIG_FILE = "input/saved_config.json"
+CONFIG_FILE: str = "input/saved_config.json"
 """File location for saved configuration of UI options"""
 
-LOW_SCENARIOS = [
+LOW_SCENARIOS: List[str] = [
     "Current Measures",
     "Global Net Zero"
 ]
 """UI naming for low resolution scenarios"""
 
-DEFAULT_LOW = 'Current Measures'
+DEFAULT_LOW: str = 'Current Measures'
 """Default low resolution scenario (UI name)"""
 
-TABLE_SECTORS = sorted(
+TABLE_SECTORS: List[Sector] = sorted(
     s.value for s in [
         Sector.COMMERCIAL,
         Sector.ELECTRICITY,
@@ -99,7 +100,7 @@ TABLE_SECTORS = sorted(
 )
 """Sectors that are included in UI options matrix"""
 
-TABLE_REGIONS = sorted(
+TABLE_REGIONS: List[Region] = sorted(
     r.value for r in [
         Region.ALBERTA,
         Region.BRITISH_COLUMBIA,
@@ -119,10 +120,10 @@ TABLE_REGIONS = sorted(
 #   Database processing constants
 #########################################
 
-SCHEMA_FILE = "input/schema.sql"
+SCHEMA_FILE: str = "input/schema.sql"
 """File location for CANOE database schema SQL"""
 
-INDEX_TABLES = {
+INDEX_TABLES: Set[str] = {
     'CommodityType','Operator','TechnologyType','TimePeriodType',
     'DataQualityCredibility','DataQualityGeography',
     'DataQualityStructure','DataQualityTechnology','DataQualityTime',
@@ -130,5 +131,5 @@ INDEX_TABLES = {
 }
 """SQLite tables that are handled by the schema and need not be transferred"""
 
-LTT_DEFAULT = 40
+LTT_DEFAULT: int = 40
 """Default lifetime for technologies in Temoa if not specified elsewhere"""
