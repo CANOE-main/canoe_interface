@@ -249,6 +249,8 @@ def main(page: ft.Page) -> None:
     page.title = "CANOE UI"
     page.vertical_alignment = ft.CrossAxisAlignment.START
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+    icon_path = os.path.abspath("assets/icon.ico")
+    page.window.icon = icon_path
     page.window_width = 1200
     page.window_height = 700
     
@@ -459,7 +461,7 @@ def main(page: ft.Page) -> None:
 
     # --- Build initial matrix UI (all regions from the start) ---
     header_row = [ft.Text("Region/Sector", weight=ft.FontWeight.BOLD, width=120)] + [
-        ft.Text(s, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER, width=80) for s in TABLE_SECTORS
+        ft.Text(s, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER, width=100) for s in TABLE_SECTORS
     ]
     matrix_rows = [ft.Row(header_row, alignment=ft.MainAxisAlignment.CENTER)]
 
@@ -490,7 +492,7 @@ def main(page: ft.Page) -> None:
             dd = ft.Dropdown(
                 options=[ft.dropdown.Option(l.value) for l in level_options],
                 value=val,
-                width=80,
+                width=100,
                 content_padding=ft.padding.only(left=5, right=5),
                 disabled=False,
             )
@@ -521,8 +523,8 @@ def main(page: ft.Page) -> None:
         pass
 
     # Controls
-    reset_button = ft.ElevatedButton("Reset Matrix", on_click=reset_matrix)
-    submit_button = ft.ElevatedButton("Submit", on_click=on_submit)
+    reset_button = ft.ElevatedButton("Reset Matrix", on_click=reset_matrix, width=200, height=40)
+    submit_button = ft.ElevatedButton("Submit", on_click=on_submit, width=80, height=40)
 
     # Settings column
     settings_column = ft.Column(
