@@ -77,9 +77,6 @@ class Level(SortableEnum):
 #   UI constants
 #########################################
 
-CONFIG_FILE: str = "input/saved_config.json"
-"""File location for saved configuration of UI options"""
-
 LOW_SCENARIOS: List[str] = [
     "Current Measures",
     "Global Net Zero"

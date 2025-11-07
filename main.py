@@ -21,12 +21,12 @@ from constants import (
     Variant,
     Feature,
     Level,
-    CONFIG_FILE,
     LOW_SCENARIOS,
     DEFAULT_LOW,
     TABLE_REGIONS,
     TABLE_SECTORS,
 )
+from directories import CONFIG_FILE
 
 # Get logger for this module
 logger = setup_logging("main")
