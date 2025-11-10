@@ -77,9 +77,6 @@ class Level(SortableEnum):
 #   UI constants
 #########################################
 
-CONFIG_FILE: str = "input/saved_config.json"
-"""File location for saved configuration of UI options"""
-
 LOW_SCENARIOS: List[str] = [
     "Current Measures",
     "Global Net Zero"
@@ -119,9 +116,6 @@ TABLE_REGIONS: List[Region] = sorted(
 #########################################
 #   Database processing constants
 #########################################
-
-SCHEMA_FILE: str = "input/schema.sql"
-"""File location for CANOE database schema SQL"""
 
 INDEX_TABLES: Set[str] = {
     'CommodityType','Operator','TechnologyType','TimePeriodType',

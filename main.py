@@ -6,8 +6,11 @@ By David Turnbull
 
 from __future__ import annotations
 
+import subprocess
 import json
 import os
+import sys
+import atexit
 from typing import Any, Dict, Set, Tuple
 import flet as ft
 from time import sleep
@@ -21,12 +24,12 @@ from constants import (
     Variant,
     Feature,
     Level,
-    CONFIG_FILE,
     LOW_SCENARIOS,
     DEFAULT_LOW,
     TABLE_REGIONS,
     TABLE_SECTORS,
 )
+from directories import CONFIG_FILE, ASSETS_DIR
 
 # Get logger for this module
 logger = setup_logging("main")
@@ -249,17 +252,37 @@ def main(page: ft.Page) -> None:
     page.title = "CANOE UI"
     page.vertical_alignment = ft.CrossAxisAlignment.START
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+    if sys.platform != "darwin":
+        icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.ico")
+        page.window.icon = icon_path
     page.window_width = 1200
     page.window_height = 700
-    
+
     # UI storage
     matrix: Dict[Tuple[str, str], ft.Dropdown] = {}
 
     # Global flags
     global_settings = {
-        "low_scenario": DEFAULT_LOW,    # Default scenario
-        "power_system_model": False # Default PSM
+        "low_scenario": DEFAULT_LOW,
+        "power_system_model": False,
+        "is_processing": False
     }
+
+    # Stop everything if window closed
+    def on_window_event(e: ft.WindowEvent):
+        if (
+            getattr(e, "type", None) == "close_request"
+            or getattr(e, "data", None) in ("close", "close_request")
+        ):  
+            status_text.value = "Exiting..."
+            page.update()
+            sleep(0.05)
+            global_settings['is_processing'] = False
+            logger.info("Processing cancelled due to window close")
+            page.window.destroy()
+
+    page.window.prevent_close = True
+    page.window.on_event = on_window_event
 
     # Widgets
     status_text = ft.Text("")
@@ -280,8 +303,15 @@ def main(page: ft.Page) -> None:
     # RE-ADDED: Power System Checkbox
     power_system_checkbox = ft.Checkbox(label="Power system model", value=False)
     
-    image = ft.Container(content=ft.Image(src="./assets/logo.png", height=50, width=60), alignment=ft.alignment.top_right)
-
+    image = ft.Container(
+        content=ft.Image(
+            src=os.path.join("assets", "logo.png"),
+            height=50,
+            width=60
+        ),
+        alignment=ft.alignment.top_right
+    )
+    
     # load saved config (will be applied once UI elements are created)
     saved_cfg = load_config()
 
@@ -289,12 +319,22 @@ def main(page: ft.Page) -> None:
         """Persist current UI state to CONFIG_FILE (JSON)."""
         try:
             cfg = {
-                "input_filename": (in_filename_text_field.value or "").strip().strip("'").strip('"'),
-                "output_filename": (out_filename_text_field.value or "").strip().strip("'").strip('"'),
+                "input_filename": os.path.normpath(
+                    (in_filename_text_field.value or "").strip().strip("'").strip('"')
+                ),
+                "output_filename": os.path.normpath(
+                    (out_filename_text_field.value or "").strip().strip("'").strip('"')
+                ),
                 "low_scenario": (scenario_dropdown.value or DEFAULT_LOW),
                 "power_system_model": bool(power_system_checkbox.value), # RE-ADDED
-                "matrix": { f"{r}|{s}": (matrix[(r, s)].value if (r, s) in matrix and matrix[(r, s)] is not None else None)
-                            for (r, s) in matrix.keys() },
+                "matrix": {
+                    f"{r}|{s}": (
+                        matrix[(r, s)].value
+                        if (r, s) in matrix and matrix[(r, s)] is not None
+                        else None
+                    )
+                    for (r, s) in matrix.keys()
+                },
             }
             os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
             with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
@@ -423,6 +463,18 @@ def main(page: ft.Page) -> None:
     out_filename_text_field.on_change = lambda e: save_config
 
     def on_submit(e: ft.ControlEvent) -> None:
+
+        if global_settings["is_processing"]:
+            # Cancel button action
+            global_settings["is_processing"] = False
+            logger.info("Processing cancelled by user")
+            submit_button.text = "Submit"
+            status_text.value = "Processing cancelled."
+            page.update()
+            return
+        
+        global_settings["is_processing"] = True
+        submit_button.text = "Cancel"
         status_text.value = "Processing..."
         page.update()
 
@@ -446,20 +498,27 @@ def main(page: ft.Page) -> None:
             dbp.aggregate_sqlite_files(
                 input_filename = input_filename,
                 output_filename = output_filename,
+                global_settings = global_settings,
                 desired_ids = desired_ids,
             )
-            status_text.value = f"Aggregation complete. Output: {output_filename}"
-            logger.info("Aggregation finished successfully (input=%s output=%s)", input_filename, output_filename)
+            if global_settings.get("is_processing", True):
+                status_text.value = f"Aggregation complete. Output: {output_filename}"
+                logger.info("Aggregation finished successfully (input=%s output=%s)", input_filename, output_filename)
         except Exception as ex:
             logger.exception("Aggregation failed (input=%s output=%s): %s", input_filename, output_filename, ex)
             status_text.value = f"Error processing database. Check log file."
+        finally:
+            # Reset processing state
+            global_settings["is_processing"] = False
+            submit_button.text = "Submit"
+            page.update()
             
         page.update()
 
 
     # --- Build initial matrix UI (all regions from the start) ---
     header_row = [ft.Text("Region/Sector", weight=ft.FontWeight.BOLD, width=120)] + [
-        ft.Text(s, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER, width=80) for s in TABLE_SECTORS
+        ft.Text(s, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER, width=100) for s in TABLE_SECTORS
     ]
     matrix_rows = [ft.Row(header_row, alignment=ft.MainAxisAlignment.CENTER)]
 
@@ -490,7 +549,7 @@ def main(page: ft.Page) -> None:
             dd = ft.Dropdown(
                 options=[ft.dropdown.Option(l.value) for l in level_options],
                 value=val,
-                width=80,
+                width=100,
                 content_padding=ft.padding.only(left=5, right=5),
                 disabled=False,
             )
@@ -521,8 +580,8 @@ def main(page: ft.Page) -> None:
         pass
 
     # Controls
-    reset_button = ft.ElevatedButton("Reset Matrix", on_click=reset_matrix)
-    submit_button = ft.ElevatedButton("Submit", on_click=on_submit)
+    reset_button = ft.ElevatedButton("Reset Matrix", on_click=reset_matrix, width=200, height=40)
+    submit_button = ft.ElevatedButton("Submit", on_click=on_submit, width=80, height=40)
 
     # Settings column
     settings_column = ft.Column(
@@ -571,7 +630,7 @@ def main(page: ft.Page) -> None:
     main_content = ft.Column(
         [
             image,
-            ft.Text("CANOE UI", size=24, weight=ft.FontWeight.BOLD),
+            ft.Text("CANOE RSS Selector", size=24, weight=ft.FontWeight.BOLD),
             ft.Text("Read accompanying document for details about choices and instructions", size=18),
             ft.Divider(),
             middle_row,  # expands
@@ -591,4 +650,4 @@ def main(page: ft.Page) -> None:
     update_ui_matrix()
 
 if __name__ == "__main__":
-    ft.app(target=main, assets_dir="./assets")
+    ft.app(target=main, assets_dir=ASSETS_DIR)
