@@ -7,8 +7,7 @@ from datetime import datetime
 import logging
 from logging.handlers import RotatingFileHandler
 
-# New logging config
-LOG_DIR = "logs"
+from directories import LOG_DIR
 
 def setup_logging(name: str = "canoe_app") -> logging.Logger:
     """
@@ -24,9 +23,6 @@ def setup_logging(name: str = "canoe_app") -> logging.Logger:
     # Only add handlers if none exist (prevents duplicate handlers)
     if not logger.handlers:
         logger.setLevel(logging.DEBUG)
-
-        # Ensure log directory exists
-        os.makedirs(LOG_DIR, exist_ok=True)
 
         # Build logfile name with current datetime
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
