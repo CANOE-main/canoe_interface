@@ -2,7 +2,7 @@
 
 A **desktop application** for managing and processing CANOE energy model databases and configurations.  
 The app provides a simple graphical interface (built with [Flet](https://flet.dev)) to select model inputs, manage SQL schemas, and process datasets for the CANOE energy systems model.
-**Please check the release section for an executable file of the interface, downloading them means you don't need to clone the repository
+**Please check the release section for an executable file of the interface, downloading them means you don't need to clone the repository**s
 ---
 
 ## Features
