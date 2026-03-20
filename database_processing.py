@@ -171,6 +171,7 @@ def aggregate_sqlite_files(
         for t in tables:
 
             if not global_settings.get("is_processing", True):
+                conn.close()
                 return
             
             cols = [c[1] for c in curs.execute(f"PRAGMA dataset.table_info({t});")]
@@ -178,6 +179,7 @@ def aggregate_sqlite_files(
                 for data_id in data_ids:
 
                     if not global_settings.get("is_processing", True):
+                        conn.close()
                         return
 
                     cmd = f"INSERT OR IGNORE INTO {t} SELECT * FROM dataset.{t} WHERE data_id == '{data_id}';"
@@ -250,6 +252,7 @@ def post_process(
         for iter in range(MAX_ITERS):
 
             if not global_settings.get("is_processing", True):
+                conn.close()
                 return
 
             bad_rt = curs.execute(
@@ -280,6 +283,7 @@ def post_process(
                     for region, tech in bad_rt:
 
                         if not global_settings.get("is_processing", True):
+                            conn.close()
                             return
             
                         try:
@@ -303,6 +307,7 @@ def post_process(
                         for tech in tech_gone:
 
                             if not global_settings.get("is_processing", True):
+                                conn.close()
                                 return
             
                             try:
@@ -324,6 +329,7 @@ def post_process(
         for iter in range(MAX_ITERS):
 
             if not global_settings.get("is_processing", True):
+                conn.close()
                 return
 
             time_all = [int(p[0]) for p in curs.execute('SELECT period FROM TimePeriod').fetchall()]
@@ -344,7 +350,7 @@ def post_process(
             df_eff['vintage'] = pd.to_numeric(df_eff['vintage'], errors='coerce').fillna(0).astype(int)
 
             df_eff['last_out'] = [
-                snap5_max2050(v + int(lifetime_process[r, t, v]))
+                snap5_max2045(v + int(lifetime_process[r, t, v]))
                 for r, t, v in df_eff[['region','tech','vintage']].itertuples(index=False, name=None)
             ]
 
@@ -356,6 +362,7 @@ def post_process(
             df_eff = df_eff.loc[~df_eff['output_comm'].isin(demand_comms)].copy()
             
             df_remove = df_eff.loc[df_eff['last_in'] < df_eff['last_out']].copy()
+            logger.error(df_remove)
             ritvo_remove = list(df_remove[['region','input_comm','tech','vintage','output_comm']].itertuples(index=False, name=None))
 
             if ritvo_remove:
@@ -368,6 +375,7 @@ def post_process(
             for region, input_comm, tech, vintage, output_comm in ritvo_remove:
 
                 if not global_settings.get("is_processing", True):
+                    conn.close()
                     return
             
                 curs.execute(
@@ -382,6 +390,7 @@ def post_process(
                 for tbl in ("CostVariable", "CostFixed", "EmissionActivity"):
 
                     if not global_settings.get("is_processing", True):
+                        conn.close()
                         return
             
                     curs.execute(
@@ -399,6 +408,7 @@ def post_process(
                 break
 
         if not global_settings.get("is_processing", True):
+            conn.close()
             return
 
         # Delete any unused commodities (techs already cleaned up)
