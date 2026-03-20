@@ -25,11 +25,11 @@ def vers_to_str(v: int) -> str:
     """
     return '0'*(3-len(str(v))) + str(v)
 
-def snap5_max2050(year: int):
+def snap5_max2045(year: int):
     """
-    Snap year to nearest prior 5-year period, max 2050
+    Snap year to nearest prior 5-year period, max 2045
     """
-    return min(2050, ((year-1) // 5) * 5)
+    return min(2045, ((year-1) // 5) * 5)
 
 #########################################
 # Initialisation
