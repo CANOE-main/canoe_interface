@@ -188,6 +188,24 @@ def aggregate_sqlite_files(
                 curs.execute(cmd)
                 conn.commit()
 
+        # Get parent IDs all the way up as well
+        n = 0 # loop breaker
+        while n < 100:
+            n += 1
+            new_parents = {
+                d[0] for d in curs.execute((
+                    "SELECT parent_id FROM DataSet "
+                    "WHERE parent_id NOT IN " 
+                    "(SELECT data_id FROM DataSet);"
+                )).fetchall()
+            }
+            if len(new_parents) == 0:
+                break
+            for data_id in new_parents:
+                cmd = f"INSERT OR IGNORE INTO DataSet SELECT * FROM dataset.DataSet WHERE data_id == '{data_id}';"
+                curs.execute(cmd)
+                conn.commit()
+
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute('DETACH dataset')
         conn.close()
