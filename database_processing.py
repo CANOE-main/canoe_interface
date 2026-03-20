@@ -362,7 +362,6 @@ def post_process(
             df_eff = df_eff.loc[~df_eff['output_comm'].isin(demand_comms)].copy()
             
             df_remove = df_eff.loc[df_eff['last_in'] < df_eff['last_out']].copy()
-            logger.error(df_remove)
             ritvo_remove = list(df_remove[['region','input_comm','tech','vintage','output_comm']].itertuples(index=False, name=None))
 
             if ritvo_remove:
