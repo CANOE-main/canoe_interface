@@ -335,15 +335,18 @@ def _get_schema_version(database):
     conn = sqlite3.connect(input_dir + f"{database}.sqlite")
     curs = conn.cursor()
 
-    tables = {t[0] for t in curs.execute("SELECT name FROM sqlite_schema").fetchall()}
-    if 'MetaData' not in tables:
+    tables = {t[0].lower() for t in curs.execute("SELECT name FROM sqlite_schema").fetchall()}
+    if 'metadata' not in tables:
         print(f"Could not get schema version for {database}. Skipped.")
         return 0
 
-    mj_vers = curs.execute("SELECT value FROM MetaData WHERE element == 'DB_MAJOR'").fetchone()[0]
-    mn_vers = curs.execute("SELECT value FROM MetaData WHERE element == 'DB_MINOR'").fetchone()[0]
-
-    return mj_vers, mn_vers
+    try:
+        mj_vers = curs.execute("SELECT value FROM metadata WHERE element = 'DB_MAJOR' COLLATE NOCASE").fetchone()
+        mn_vers = curs.execute("SELECT value FROM metadata WHERE element = 'DB_MINOR' COLLATE NOCASE").fetchone()
+        if mj_vers is None or mn_vers is None: return 0
+        return int(mj_vers[0]), int(mn_vers[0])
+    except Exception:
+        return 0
 
 
 
