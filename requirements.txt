@@ -23,4 +23,4 @@ requests
 PyYAML
 XlsxWriter
 scipy
-tsam
+tsam==3.4.2
