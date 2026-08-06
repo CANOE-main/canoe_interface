@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS data_source
     data_id   TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (source_id) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (source_id, data_id)
+    PRIMARY KEY (source_id)
 );
 
 -- ============================================================
@@ -245,7 +245,7 @@ CREATE TABLE IF NOT EXISTS commodity
     data_id     TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (name) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (name, data_id)
+    PRIMARY KEY (name)
 );
 
 CREATE TABLE IF NOT EXISTS technology
@@ -268,7 +268,7 @@ CREATE TABLE IF NOT EXISTS technology
         REFERENCES data_set (data_id),
     FOREIGN KEY (flag) REFERENCES technology_type (label),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (tech, data_id)
+    PRIMARY KEY (tech)
 );
 
 CREATE TABLE IF NOT EXISTS tech_group
@@ -278,7 +278,7 @@ CREATE TABLE IF NOT EXISTS tech_group
     data_id    TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (group_name) REFERENCES tech_group_label (group_name),
-    PRIMARY KEY (group_name, data_id)
+    PRIMARY KEY (group_name)
 );
 
 CREATE TABLE IF NOT EXISTS tech_group_member
@@ -289,7 +289,7 @@ CREATE TABLE IF NOT EXISTS tech_group_member
         REFERENCES data_set (data_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
     FOREIGN KEY (group_name) REFERENCES tech_group_label (group_name),
-    PRIMARY KEY (group_name, tech, data_id)
+    PRIMARY KEY (group_name, tech)
 );
 
 -- ============================================================
@@ -315,7 +315,7 @@ CREATE TABLE IF NOT EXISTS capacity_credit
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, period, tech, vintage, data_id),
+    PRIMARY KEY (region, period, tech, vintage),
     CHECK (credit >= 0 AND credit <= 1)
 );
 
@@ -340,7 +340,7 @@ CREATE TABLE IF NOT EXISTS capacity_factor_process
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, season, tod, tech, vintage, data_id),
+    PRIMARY KEY (region, season, tod, tech, vintage),
     CHECK (factor >= 0 AND factor <= 1)
 );
 
@@ -364,7 +364,7 @@ CREATE TABLE IF NOT EXISTS capacity_factor_tech
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, season, tod, tech, data_id),
+    PRIMARY KEY (region, season, tod, tech),
     CHECK (factor >= 0 AND factor <= 1)
 );
 
@@ -385,7 +385,7 @@ CREATE TABLE IF NOT EXISTS capacity_to_activity
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, tech, data_id)
+    PRIMARY KEY (region, tech)
 );
 
 CREATE TABLE IF NOT EXISTS construction_input
@@ -409,7 +409,7 @@ CREATE TABLE IF NOT EXISTS construction_input
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
     FOREIGN KEY (input_comm) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, input_comm, tech, vintage, data_id)
+    PRIMARY KEY (region, input_comm, tech, vintage)
 );
 
 CREATE TABLE IF NOT EXISTS cost_emission
@@ -431,7 +431,7 @@ CREATE TABLE IF NOT EXISTS cost_emission
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (emis_comm) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, period, emis_comm, data_id)
+    PRIMARY KEY (region, period, emis_comm)
 );
 
 CREATE TABLE IF NOT EXISTS cost_fixed
@@ -455,7 +455,7 @@ CREATE TABLE IF NOT EXISTS cost_fixed
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, period, tech, vintage, data_id)
+    PRIMARY KEY (region, period, tech, vintage)
 );
 
 CREATE TABLE IF NOT EXISTS cost_invest
@@ -477,7 +477,7 @@ CREATE TABLE IF NOT EXISTS cost_invest
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, tech, vintage, data_id)
+    PRIMARY KEY (region, tech, vintage)
 );
 
 CREATE TABLE IF NOT EXISTS cost_variable
@@ -501,7 +501,7 @@ CREATE TABLE IF NOT EXISTS cost_variable
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, period, tech, vintage, data_id)
+    PRIMARY KEY (region, period, tech, vintage)
 );
 
 CREATE TABLE IF NOT EXISTS demand
@@ -523,7 +523,7 @@ CREATE TABLE IF NOT EXISTS demand
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (commodity) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, period, commodity, data_id)
+    PRIMARY KEY (region, period, commodity)
 );
 
 CREATE TABLE IF NOT EXISTS demand_specific_distribution
@@ -548,7 +548,7 @@ CREATE TABLE IF NOT EXISTS demand_specific_distribution
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (demand_name) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, period, season, tod, demand_name, data_id),
+    PRIMARY KEY (region, period, season, tod, demand_name),
     CHECK (dsd >= 0 AND dsd <= 1)
 );
 
@@ -573,7 +573,7 @@ CREATE TABLE IF NOT EXISTS end_of_life_output
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
     FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, tech, vintage, output_comm, data_id)
+    PRIMARY KEY (region, tech, vintage, output_comm)
 );
 
 CREATE TABLE IF NOT EXISTS efficiency
@@ -599,7 +599,7 @@ CREATE TABLE IF NOT EXISTS efficiency
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
     FOREIGN KEY (input_comm) REFERENCES commodity_label (commodity),
     FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, input_comm, tech, vintage, output_comm, data_id),
+    PRIMARY KEY (region, input_comm, tech, vintage, output_comm),
     CHECK (efficiency > 0)
 );
 
@@ -629,7 +629,7 @@ CREATE TABLE IF NOT EXISTS efficiency_variable
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
     FOREIGN KEY (input_comm) REFERENCES commodity_label (commodity),
     FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, season, tod, input_comm, tech, vintage, output_comm, data_id),
+    PRIMARY KEY (region, season, tod, input_comm, tech, vintage, output_comm),
     CHECK (efficiency > 0)
 );
 
@@ -658,7 +658,7 @@ CREATE TABLE IF NOT EXISTS emission_activity
     FOREIGN KEY (emis_comm) REFERENCES commodity_label (commodity),
     FOREIGN KEY (input_comm) REFERENCES commodity_label (commodity),
     FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, emis_comm, input_comm, tech, vintage, output_comm, data_id)
+    PRIMARY KEY (region, emis_comm, input_comm, tech, vintage, output_comm)
 );
 
 CREATE TABLE IF NOT EXISTS emission_embodied
@@ -682,7 +682,7 @@ CREATE TABLE IF NOT EXISTS emission_embodied
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
     FOREIGN KEY (emis_comm) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, emis_comm, tech, vintage, data_id)
+    PRIMARY KEY (region, emis_comm, tech, vintage)
 );
 
 CREATE TABLE IF NOT EXISTS emission_end_of_life
@@ -706,7 +706,7 @@ CREATE TABLE IF NOT EXISTS emission_end_of_life
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
     FOREIGN KEY (emis_comm) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, emis_comm, tech, vintage, data_id)
+    PRIMARY KEY (region, emis_comm, tech, vintage)
 );
 
 CREATE TABLE IF NOT EXISTS existing_capacity
@@ -728,7 +728,7 @@ CREATE TABLE IF NOT EXISTS existing_capacity
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, tech, vintage, data_id)
+    PRIMARY KEY (region, tech, vintage)
 );
 
 CREATE TABLE IF NOT EXISTS loan_lifetime_process
@@ -750,7 +750,7 @@ CREATE TABLE IF NOT EXISTS loan_lifetime_process
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, tech, vintage, data_id)
+    PRIMARY KEY (region, tech, vintage)
 );
 
 CREATE TABLE IF NOT EXISTS loan_rate
@@ -771,7 +771,7 @@ CREATE TABLE IF NOT EXISTS loan_rate
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, tech, vintage, data_id)
+    PRIMARY KEY (region, tech, vintage)
 );
 
 CREATE TABLE IF NOT EXISTS lifetime_process
@@ -793,7 +793,7 @@ CREATE TABLE IF NOT EXISTS lifetime_process
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, tech, vintage, data_id)
+    PRIMARY KEY (region, tech, vintage)
 );
 
 CREATE TABLE IF NOT EXISTS lifetime_tech
@@ -813,7 +813,7 @@ CREATE TABLE IF NOT EXISTS lifetime_tech
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, tech, data_id)
+    PRIMARY KEY (region, tech)
 );
 
 CREATE TABLE IF NOT EXISTS limit_growth_capacity
@@ -835,7 +835,7 @@ CREATE TABLE IF NOT EXISTS limit_growth_capacity
     data_id       TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, tech_or_group, operator, data_id)
+    PRIMARY KEY (region, tech_or_group, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_degrowth_capacity
@@ -857,7 +857,7 @@ CREATE TABLE IF NOT EXISTS limit_degrowth_capacity
     data_id       TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, tech_or_group, operator, data_id)
+    PRIMARY KEY (region, tech_or_group, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_growth_new_capacity
@@ -879,7 +879,7 @@ CREATE TABLE IF NOT EXISTS limit_growth_new_capacity
     data_id       TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, tech_or_group, operator, data_id)
+    PRIMARY KEY (region, tech_or_group, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_degrowth_new_capacity
@@ -901,7 +901,7 @@ CREATE TABLE IF NOT EXISTS limit_degrowth_new_capacity
     data_id       TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, tech_or_group, operator, data_id)
+    PRIMARY KEY (region, tech_or_group, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_growth_new_capacity_delta
@@ -923,7 +923,7 @@ CREATE TABLE IF NOT EXISTS limit_growth_new_capacity_delta
     data_id       TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, tech_or_group, operator, data_id)
+    PRIMARY KEY (region, tech_or_group, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_degrowth_new_capacity_delta
@@ -945,7 +945,7 @@ CREATE TABLE IF NOT EXISTS limit_degrowth_new_capacity_delta
     data_id       TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, tech_or_group, operator, data_id)
+    PRIMARY KEY (region, tech_or_group, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_storage_level_fraction
@@ -971,7 +971,7 @@ CREATE TABLE IF NOT EXISTS limit_storage_level_fraction
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
     CHECK (fraction >= 0 AND fraction <= 1),
-    PRIMARY KEY (region, season, tod, tech, operator, data_id)
+    PRIMARY KEY (region, season, tod, tech, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_activity
@@ -994,7 +994,7 @@ CREATE TABLE IF NOT EXISTS limit_activity
     data_id       TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, period, tech_or_group, operator, data_id)
+    PRIMARY KEY (region, period, tech_or_group, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_activity_share
@@ -1017,7 +1017,7 @@ CREATE TABLE IF NOT EXISTS limit_activity_share
     data_id     TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, period, sub_group, super_group, operator, data_id)
+    PRIMARY KEY (region, period, sub_group, super_group, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_annual_capacity_factor
@@ -1041,7 +1041,7 @@ CREATE TABLE IF NOT EXISTS limit_annual_capacity_factor
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, tech_or_group, vintage, output_comm, operator, data_id),
+    PRIMARY KEY (region, tech_or_group, vintage, output_comm, operator),
     CHECK (factor >= 0 AND factor <= 1)
 );
 
@@ -1065,7 +1065,7 @@ CREATE TABLE IF NOT EXISTS limit_capacity
     data_id       TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, period, tech_or_group, operator, data_id)
+    PRIMARY KEY (region, period, tech_or_group, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_capacity_share
@@ -1088,7 +1088,7 @@ CREATE TABLE IF NOT EXISTS limit_capacity_share
     data_id     TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, period, sub_group, super_group, operator, data_id)
+    PRIMARY KEY (region, period, sub_group, super_group, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_new_capacity
@@ -1111,7 +1111,7 @@ CREATE TABLE IF NOT EXISTS limit_new_capacity
     data_id       TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, tech_or_group, vintage, operator, data_id)
+    PRIMARY KEY (region, tech_or_group, vintage, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_new_capacity_share
@@ -1134,7 +1134,7 @@ CREATE TABLE IF NOT EXISTS limit_new_capacity_share
     data_id     TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, sub_group, super_group, vintage, operator, data_id)
+    PRIMARY KEY (region, sub_group, super_group, vintage, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_resource
@@ -1155,7 +1155,7 @@ CREATE TABLE IF NOT EXISTS limit_resource
     data_id       TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, tech_or_group, operator, data_id)
+    PRIMARY KEY (region, tech_or_group, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_seasonal_capacity_factor
@@ -1178,7 +1178,7 @@ CREATE TABLE IF NOT EXISTS limit_seasonal_capacity_factor
     data_id       TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, season, tech_or_group, operator, data_id)
+    PRIMARY KEY (region, season, tech_or_group, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_tech_input_split
@@ -1203,7 +1203,7 @@ CREATE TABLE IF NOT EXISTS limit_tech_input_split
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
     FOREIGN KEY (input_comm) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, period, input_comm, tech, operator, data_id)
+    PRIMARY KEY (region, period, input_comm, tech, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_tech_input_split_annual
@@ -1227,7 +1227,7 @@ CREATE TABLE IF NOT EXISTS limit_tech_input_split_annual
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, period, input_comm, tech, operator, data_id)
+    PRIMARY KEY (region, period, input_comm, tech, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_tech_output_split
@@ -1252,7 +1252,7 @@ CREATE TABLE IF NOT EXISTS limit_tech_output_split
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
     FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, period, tech, output_comm, operator, data_id)
+    PRIMARY KEY (region, period, tech, output_comm, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_tech_output_split_annual
@@ -1277,7 +1277,7 @@ CREATE TABLE IF NOT EXISTS limit_tech_output_split_annual
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
     FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, period, tech, output_comm, operator, data_id)
+    PRIMARY KEY (region, period, tech, output_comm, operator)
 );
 
 CREATE TABLE IF NOT EXISTS limit_emission
@@ -1301,7 +1301,7 @@ CREATE TABLE IF NOT EXISTS limit_emission
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (emis_comm) REFERENCES commodity_label (commodity),
-    PRIMARY KEY (region, period, emis_comm, operator, data_id)
+    PRIMARY KEY (region, period, emis_comm, operator)
 );
 
 CREATE TABLE IF NOT EXISTS linked_tech
@@ -1318,7 +1318,7 @@ CREATE TABLE IF NOT EXISTS linked_tech
     FOREIGN KEY (driven_tech) REFERENCES technology_label (tech),
     FOREIGN KEY (emis_comm) REFERENCES commodity_label (commodity),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (primary_region, primary_tech, emis_comm, data_id)
+    PRIMARY KEY (primary_region, primary_tech, emis_comm)
 );
 
 CREATE TABLE IF NOT EXISTS planning_reserve_margin
@@ -1336,7 +1336,7 @@ CREATE TABLE IF NOT EXISTS planning_reserve_margin
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (region) REFERENCES region (region),
-    PRIMARY KEY (region, data_id)
+    PRIMARY KEY (region)
 );
 
 CREATE TABLE IF NOT EXISTS ramp_down_hourly
@@ -1355,7 +1355,7 @@ CREATE TABLE IF NOT EXISTS ramp_down_hourly
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, tech, data_id)
+    PRIMARY KEY (region, tech)
 );
 
 CREATE TABLE IF NOT EXISTS ramp_up_hourly
@@ -1374,7 +1374,7 @@ CREATE TABLE IF NOT EXISTS ramp_up_hourly
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, tech, data_id)
+    PRIMARY KEY (region, tech)
 );
 
 CREATE TABLE IF NOT EXISTS reserve_capacity_derate
@@ -1396,7 +1396,7 @@ CREATE TABLE IF NOT EXISTS reserve_capacity_derate
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, season, tech, vintage, data_id),
+    PRIMARY KEY (region, season, tech, vintage),
     CHECK (factor >= 0 AND factor <= 1)
 );
 
@@ -1415,7 +1415,7 @@ CREATE TABLE IF NOT EXISTS storage_duration
     data_id     TEXT
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
-    PRIMARY KEY (region, tech, data_id)
+    PRIMARY KEY (region, tech)
 );
 
 CREATE TABLE IF NOT EXISTS lifetime_survival_curve
@@ -1437,7 +1437,7 @@ CREATE TABLE IF NOT EXISTS lifetime_survival_curve
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech) REFERENCES technology_label (tech),
-    PRIMARY KEY (region, period, tech, vintage, data_id)
+    PRIMARY KEY (region, period, tech, vintage)
 );
 
 CREATE TABLE IF NOT EXISTS rps_requirement
@@ -1459,7 +1459,7 @@ CREATE TABLE IF NOT EXISTS rps_requirement
         REFERENCES data_set (data_id),
     FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
     FOREIGN KEY (tech_group) REFERENCES tech_group_label (group_name),
-    PRIMARY KEY (region, period, tech_group, data_id)
+    PRIMARY KEY (region, period, tech_group)
 );
 
 CREATE TABLE IF NOT EXISTS output_dual_variable
