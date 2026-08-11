@@ -262,9 +262,9 @@ def process_single_day_period(database: str, hours: list):
 
         # Get a running proportion sum of DSD
         df['run_sum'] = df['dsd'].cumsum()/df['dsd'].sum()
-        # Get the smallest DSD above thresh to zero out actual table
+        # Get the largest DSD whose cumulative proportion is still below the threshold
         thresh_dsd = df["dsd"].loc[df["run_sum"] < utils.config["dsd_threshold"]].max()
-        thresh_dsd += 1e-12  # Small buffer to avoid floating point issues
+        thresh_dsd -= 1e-10  # Small buffer to avoid floating point issues
 
         # There might be nothing under the threshold if using few rep days
         if not pd.isna(thresh_dsd) and thresh_dsd < df["dsd"].max():
