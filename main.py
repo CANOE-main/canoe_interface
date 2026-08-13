@@ -808,7 +808,7 @@ def main(page: ft.Page) -> None:
 
                 shutil.copy(output_filename, os.path.join(in_sql_dir, os.path.basename(output_filename)))
 
-                process = subprocess.Popen([sys.executable, "process_all.py"], cwd=rep_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
+                process = subprocess.Popen([sys.executable, "process_all.py", "--no-cluster"], cwd=rep_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
                 for line in process.stdout:
                     console_output.controls.append(ft.Text(line.rstrip(), color="white", font_family="Consolas", size=12))
                     page.update()
@@ -837,7 +837,7 @@ def main(page: ft.Page) -> None:
         threading.Thread(target=runner, daemon=True).start()
 
     btn_init = ft.ElevatedButton("Initialize (Cluster Only)", on_click=on_initialize)
-    btn_run = ft.ElevatedButton("Run (Aggregate & Cluster)", on_click=on_run_all)
+    btn_run = ft.ElevatedButton("Run (Aggregate & Process)", on_click=on_run_all)
 
     rep_content = ft.Column([
         ft.Container(height=10),
