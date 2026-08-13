@@ -282,26 +282,13 @@ def post_process(
 
             bad_rt = curs.execute(
                 """
-                SELECT DISTINCT e.region, e.tech
-                FROM efficiency e
-                WHERE NOT EXISTS (
-                    SELECT 1
-                    FROM efficiency x
-                    WHERE x.region = e.region
-                    AND x.tech = e.tech
-                    AND (
-                        x.output_comm IN (
-                            SELECT name
-                            FROM commodity
-                            WHERE flag = 'd'
-                        )
-                        OR EXISTS (
-                            SELECT 1
-                            FROM efficiency downstream
-                            WHERE downstream.region = x.region
-                                AND downstream.input_comm = x.output_comm
-                        )
-                    )
+                SELECT DISTINCT region, tech
+                FROM efficiency
+                WHERE output_comm NOT IN (
+                    SELECT name FROM commodity WHERE flag = 'd'
+                )
+                AND (region, output_comm) NOT IN (
+                    SELECT region, input_comm FROM efficiency
                 )
                 """
             ).fetchall()
