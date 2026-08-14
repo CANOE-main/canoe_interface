@@ -5,14 +5,16 @@ Aligns a Temoa database with representative days configured in days.csv
 import sqlite3
 import os
 import pandas as pd
-import utils
+from . import utils
 import sys
 import math
 
 this_dir = os.path.realpath(os.path.dirname(__file__)) + "/"
 input_dir = input_dir = this_dir + "input_sqlite/"
 output_dir = this_dir + "output_sqlite/"
-
+def reset():
+    global initialised
+    initialised = False
 schema = this_dir + "canoe_schema_v3_1.sql"
 
 df_period: pd.DataFrame

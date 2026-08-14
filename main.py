@@ -6,7 +6,12 @@ By David Turnbull
 
 from __future__ import annotations
 
-import subprocess
+import matplotlib
+matplotlib.use('Agg')
+
+from representative_periods import clustering as rep_clustering
+from representative_periods import process_all as rep_process_all
+from representative_periods import utils as rep_utils
 import json
 import os
 import sys
@@ -633,8 +638,38 @@ def main(page: ft.Page) -> None:
         alignment=ft.alignment.center,
     )
 
-    rep_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "representative_periods"))
-    rep_config_path = os.path.join(rep_dir, "config.yaml")
+    rep_dir = os.path.abspath(
+    os.path.join(
+        os.path.dirname(__file__),
+        "representative_periods"
+    )
+    )
+
+    rep_config_path = os.path.join(
+        rep_dir,
+        "config.yaml"
+    )
+
+    rep_input_dir = os.path.join(
+        rep_dir,
+        "input_sqlite"
+    )
+
+    rep_output_dir = os.path.join(
+        rep_dir,
+        "output_sqlite"
+    )
+
+    rep_clustering_output_dir = os.path.join(
+        rep_dir,
+        "clustering_output_data"
+    )
+
+    # PyInstaller does not preserve empty directories,
+    # so create working directories at runtime.
+    os.makedirs(rep_input_dir, exist_ok=True)
+    os.makedirs(rep_output_dir, exist_ok=True)
+    os.makedirs(rep_clustering_output_dir, exist_ok=True)
 
     def load_rep_config():
         try:
@@ -746,19 +781,34 @@ def main(page: ft.Page) -> None:
         apply_rep_ui_to_config()
         
         def runner():
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
+
+            redirector = ConsoleRedirector(console_output, page)
+
+            sys.stdout = redirector
+            sys.stderr = redirector
+
             try:
-                process = subprocess.Popen([sys.executable, "clustering.py"], cwd=rep_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
-                for line in process.stdout:
-                    console_output.controls.append(ft.Text(line.rstrip(), color="white", font_family="Consolas", size=12))
-                    page.update()
-                process.wait()
-                if process.returncode == 0:
-                    rep_status_text.value = "Clustering initialized successfully!"
-                else:
-                    rep_status_text.value = f"Clustering failed with code {process.returncode}"
+                # config.yaml was just updated by apply_rep_ui_to_config()
+                rep_utils.reload_config()
+
+                # Previously the subprocess gave us a fresh module each run.
+                rep_clustering.reset()
+
+                rep_clustering.run(
+                    show_plots=rep_utils.config.get("show_plots", False)
+                )
+
+                rep_status_text.value = "Clustering initialized successfully!"
+
             except Exception as ex:
                 rep_status_text.value = f"Error during clustering: {ex}"
+
             finally:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+
                 global_settings["is_processing"] = False
                 page.update()
 
@@ -767,74 +817,229 @@ def main(page: ft.Page) -> None:
     def on_run_all(e):
         if global_settings["is_processing"]:
             return
-        
+
         rep_status_text.value = "Running Aggregation..."
         console_output.controls.clear()
         page.update()
 
         global_settings["is_processing"] = True
-        input_filename = in_filename_text_field.value.strip().strip("'").strip('"')
-        output_filename = out_filename_text_field.value.strip().strip("'").strip('"')
+
+        input_filename = (
+            in_filename_text_field.value
+            .strip()
+            .strip("'")
+            .strip('"')
+        )
+
+        output_filename = (
+            out_filename_text_field.value
+            .strip()
+            .strip("'")
+            .strip('"')
+        )
 
         def runner():
             old_stdout = sys.stdout
             old_stderr = sys.stderr
-            redirector = ConsoleRedirector(console_output, page)
+
+            redirector = ConsoleRedirector(
+                console_output,
+                page
+            )
+
             sys.stdout = redirector
             sys.stderr = redirector
+
             try:
+                # ---------------------------------------
+                # 1. Run normal CANOE aggregation
+                # ---------------------------------------
+
                 save_config()
-                desired_ids = get_matrix_selection(matrix, global_settings)
-                dbp.aggregate_sqlite_files(
-                    input_filename = input_filename,
-                    output_filename = output_filename,
-                    global_settings = global_settings,
-                    desired_ids = desired_ids,
+
+                desired_ids = get_matrix_selection(
+                    matrix,
+                    global_settings
                 )
 
-                rep_status_text.value = "Aggregation complete. Running Representative Periods..."
+                dbp.aggregate_sqlite_files(
+                    input_filename=input_filename,
+                    output_filename=output_filename,
+                    global_settings=global_settings,
+                    desired_ids=desired_ids,
+                )
+
+                aggregated_db = os.path.abspath(
+                    output_filename
+                )
+
+                if not os.path.isfile(aggregated_db):
+                    raise FileNotFoundError(
+                        "CANOE aggregation did not produce "
+                        f"the expected database: {aggregated_db}"
+                    )
+
+                print(
+                    f"Aggregation complete: {aggregated_db}"
+                )
+
+                rep_status_text.value = (
+                    "Aggregation complete. "
+                    "Running Representative Periods..."
+                )
                 page.update()
+
+                # ---------------------------------------
+                # 2. Save Representative Period settings
+                # ---------------------------------------
 
                 apply_rep_ui_to_config()
 
-                in_sql_dir = os.path.join(rep_dir, "input_sqlite")
-                out_sql_dir = os.path.join(rep_dir, "output_sqlite")
-                for f in glob.glob(os.path.join(in_sql_dir, "*.sqlite")):
-                    try: os.remove(f)
-                    except Exception: pass
-                for f in glob.glob(os.path.join(out_sql_dir, "*.sqlite")):
-                    try: os.remove(f)
-                    except Exception: pass
+                # ---------------------------------------
+                # 3. Prepare Representative Period dirs
+                # ---------------------------------------
 
-                shutil.copy(output_filename, os.path.join(in_sql_dir, os.path.basename(output_filename)))
+                os.makedirs(
+                    rep_input_dir,
+                    exist_ok=True
+                )
 
-                process = subprocess.Popen([sys.executable, "process_all.py", "--no-cluster"], cwd=rep_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
-                for line in process.stdout:
-                    console_output.controls.append(ft.Text(line.rstrip(), color="white", font_family="Consolas", size=12))
-                    page.update()
-                process.wait()
+                os.makedirs(
+                    rep_output_dir,
+                    exist_ok=True
+                )
+
+                # Remove old staged databases
+                for f in glob.glob(
+                    os.path.join(
+                        rep_input_dir,
+                        "*.sqlite"
+                    )
+                ):
+                    try:
+                        os.remove(f)
+                    except Exception:
+                        pass
+
+                # Remove old RP output databases
+                for f in glob.glob(
+                    os.path.join(
+                        rep_output_dir,
+                        "*.sqlite"
+                    )
+                ):
+                    try:
+                        os.remove(f)
+                    except Exception:
+                        pass
+
+                # ---------------------------------------
+                # 4. Stage aggregated CANOE database
+                # ---------------------------------------
+
+                staged_db = os.path.join(
+                    rep_input_dir,
+                    os.path.basename(aggregated_db)
+                )
+
+                shutil.copy2(
+                    aggregated_db,
+                    staged_db
+                )
+
+                if not os.path.isfile(staged_db):
+                    raise FileNotFoundError(
+                        "Failed to stage database for "
+                        f"Representative Periods: {staged_db}"
+                    )
+
+                print(
+                    f"Representative Periods input: "
+                    f"{staged_db}"
+                )
+
+                # ---------------------------------------
+                # 5. Run Representative Period processing
+                # ---------------------------------------
+
+                rep_process_all.run(
+                    run_clustering=False
+                )
+
+                # ---------------------------------------
+                # 6. Find Representative Period output
+                # ---------------------------------------
 
                 final_p = rep_final_periods.value
-                out_files = glob.glob(os.path.join(out_sql_dir, "*.sqlite"))
-                if out_files:
-                    res_db = out_files[0]
-                    new_out_path = output_filename.replace(".sqlite", f"_{final_p}d.sqlite")
-                    if not output_filename.endswith(".sqlite"):
-                        new_out_path = output_filename + f"_{final_p}d.sqlite"
-                    shutil.copy(res_db, new_out_path)
-                    rep_status_text.value = f"Success! Output at: {new_out_path}"
+
+                out_files = glob.glob(
+                    os.path.join(
+                        rep_output_dir,
+                        "*.sqlite"
+                    )
+                )
+
+                if not out_files:
+                    raise FileNotFoundError(
+                        "Representative Period processing "
+                        "completed but no output SQLite "
+                        f"database was found in {rep_output_dir}"
+                    )
+
+                res_db = out_files[0]
+
+                # ---------------------------------------
+                # 7. Copy final database to requested dir
+                # ---------------------------------------
+
+                if output_filename.lower().endswith(
+                    ".sqlite"
+                ):
+                    new_out_path = (
+                        output_filename[:-7]
+                        + f"_{final_p}d.sqlite"
+                    )
                 else:
-                    rep_status_text.value = "Process completed but output database not found."
+                    new_out_path = (
+                        output_filename
+                        + f"_{final_p}d.sqlite"
+                    )
+
+                shutil.copy2(
+                    res_db,
+                    new_out_path
+                )
+
+                rep_status_text.value = (
+                    f"Success! Output at: {new_out_path}"
+                )
+
+                print(
+                    f"Representative Periods complete: "
+                    f"{new_out_path}"
+                )
 
             except Exception as ex:
-                rep_status_text.value = f"Error during Run All: {ex}"
+                import traceback
+                rep_status_text.value = (
+                    f"Error during Run All: {ex}\n\n{traceback.format_exc()}"
+                )
+
+                print(
+                    f"ERROR during Run All: {ex}"
+                )
+
             finally:
                 sys.stdout = old_stdout
                 sys.stderr = old_stderr
+
                 global_settings["is_processing"] = False
                 page.update()
 
-        threading.Thread(target=runner, daemon=True).start()
+        threading.Thread(
+            target=runner,
+            daemon=True
+        ).start()
 
     btn_init = ft.ElevatedButton("Initialize (Cluster Only)", on_click=on_initialize)
     btn_run = ft.ElevatedButton("Run (Aggregate & Process)", on_click=on_run_all)

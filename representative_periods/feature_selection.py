@@ -1,11 +1,25 @@
 import pandas as pd
-import utils
+from . import utils
+import os
+
+
+
+
 
 
 # Returns the period index (may be multi-day) with the highest mean value of a given timeseries
 def max_mean_period(feature_config: dict):
 
-    df_timeseries = pd.read_csv(f"timeseries/{feature_config['timeseries']}.csv", index_col=0)
+    this_dir = os.path.realpath(os.path.dirname(__file__))
+
+    df_timeseries = pd.read_csv(
+    os.path.join(
+        this_dir,
+        "timeseries",
+        f"{feature_config['timeseries']}.csv",
+    ),
+    index_col=0,
+    )
 
     n_days = feature_config['days_in_period']
     total_periods = len(df_timeseries) // (24*n_days) # number of n-day periods in the timeseries

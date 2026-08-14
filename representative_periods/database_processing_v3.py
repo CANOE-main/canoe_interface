@@ -6,9 +6,11 @@ import sqlite3
 import os
 import pandas as pd
 import shutil
-import utils
+from . import utils
 import sys
-
+def reset():
+    global initialised
+    initialised = False
 this_dir = os.path.realpath(os.path.dirname(__file__)) + "/"
 input_dir = this_dir + "input_sqlite/"
 output_dir = this_dir + "output_sqlite/"

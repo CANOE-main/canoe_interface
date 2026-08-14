@@ -6,12 +6,14 @@ import sqlite3
 import os
 import pandas as pd
 import shutil
-import utils
+from . import utils
 
 this_dir = os.path.realpath(os.path.dirname(__file__)) + "/"
 input_dir = this_dir + "input_sqlite/"
 output_dir = this_dir + "output_sqlite/"
-
+def reset():
+    global initialised
+    initialised = False
 df_periods: pd.DataFrame
 initialised = False
 

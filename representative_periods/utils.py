@@ -6,11 +6,24 @@ import os
 import yaml
 
 this_dir = os.path.realpath(os.path.dirname(__file__)) + "/"
-config: dict
-initialised = False
+config_path = os.path.join(this_dir, "config.yaml")
 
-stream = open(this_dir + "config.yaml", 'r')
-config = dict(yaml.load(stream, Loader=yaml.Loader))
+
+def load_config() -> dict:
+    with open(config_path, "r", encoding="utf-8") as stream:
+        loaded = yaml.load(stream, Loader=yaml.Loader)
+
+    return dict(loaded or {})
+
+
+def reload_config() -> dict:
+    global config
+
+    config = load_config()
+    return config
+
+
+config: dict = load_config()
 
 
 def stringify_hour(hour: int) -> str:

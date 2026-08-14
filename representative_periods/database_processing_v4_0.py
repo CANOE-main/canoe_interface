@@ -5,10 +5,12 @@ Aligns a Temoa database with representative days configured in days.csv
 import sqlite3
 import os
 import pandas as pd
-import utils
+from . import utils
 import sys
 import math
-
+def reset():
+    global initialised
+    initialised = False
 this_dir = os.path.realpath(os.path.dirname(__file__)) + "/"
 input_dir = input_dir = this_dir + "input_sqlite/"
 output_dir = this_dir + "output_sqlite/"
