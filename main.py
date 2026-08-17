@@ -724,6 +724,36 @@ def main(page: ft.Page) -> None:
     rep_days_per_period = ft.TextField(label="Days Per Period", value=str(rep_cfg.get("days_per_period", 1)), width=150)
     rep_rerun_clustering = ft.Checkbox(label="Rerun Clustering", value=rep_cfg.get("rerun_clustering", False))
     rep_show_plots = ft.Checkbox(label="Show Plots", value=rep_cfg.get("show_plots", False))
+    rep_use_pca = ft.Checkbox(label="Use PCA", value=rep_cfg.get("use_pca", True))
+
+    pca_cols_in_cfg = []
+    if "pca_groups" in rep_cfg and len(rep_cfg["pca_groups"]) > 0:
+        pca_cols_in_cfg = rep_cfg["pca_groups"][0].get("columns", [])
+    
+    master_weather_cols = []
+    for region, cols in rep_cfg.get("timeseries", {}).items():
+        if cols:
+            for col in cols:
+                if any(x in col for x in ["wind_speed", "irradiance", "humidity", "temperature"]):
+                    if col not in master_weather_cols:
+                        master_weather_cols.append(col)
+
+    weather_checkboxes = {}
+    checkbox_list = []
+    for col in master_weather_cols:
+        is_checked = col in pca_cols_in_cfg if pca_cols_in_cfg else True 
+        cb = ft.Checkbox(label=col, value=is_checked)
+        weather_checkboxes[col] = cb
+        checkbox_list.append(cb)
+
+    weather_dropdown = ft.ExpansionTile(
+        title=ft.Text("Select Weather Columns for PCA"),
+        controls=[ft.Container(
+            content=ft.Column(checkbox_list, scroll=ft.ScrollMode.ADAPTIVE, height=200),
+            padding=10
+        )],
+        width=400
+    )
 
     rep_status_text = ft.Text("")
     
@@ -770,6 +800,14 @@ def main(page: ft.Page) -> None:
         except: pass
         cfg["rerun_clustering"] = rep_rerun_clustering.value
         cfg["show_plots"] = rep_show_plots.value
+        cfg["use_pca"] = rep_use_pca.value
+
+        selected_cols = [col for col, cb in weather_checkboxes.items() if cb.value]
+        if "pca_groups" not in cfg or not cfg["pca_groups"]:
+            cfg["pca_groups"] = [{"name": "weather", "columns": selected_cols, "n_components": 6}]
+        else:
+            cfg["pca_groups"][0]["columns"] = selected_cols
+
         save_rep_config(cfg)
 
     def on_initialize(e):
@@ -837,6 +875,8 @@ def main(page: ft.Page) -> None:
             .strip("'")
             .strip('"')
         )
+        if not output_filename.lower().endswith('.sqlite'):
+            output_filename += '.sqlite'
 
         def runner():
             old_stdout = sys.stdout
@@ -896,101 +936,10 @@ def main(page: ft.Page) -> None:
                 apply_rep_ui_to_config()
 
                 # ---------------------------------------
-                # 3. Prepare Representative Period dirs
+                # 3. Determine output path
                 # ---------------------------------------
-
-                os.makedirs(
-                    rep_input_dir,
-                    exist_ok=True
-                )
-
-                os.makedirs(
-                    rep_output_dir,
-                    exist_ok=True
-                )
-
-                # Remove old staged databases
-                for f in glob.glob(
-                    os.path.join(
-                        rep_input_dir,
-                        "*.sqlite"
-                    )
-                ):
-                    try:
-                        os.remove(f)
-                    except Exception:
-                        pass
-
-                # Remove old RP output databases
-                for f in glob.glob(
-                    os.path.join(
-                        rep_output_dir,
-                        "*.sqlite"
-                    )
-                ):
-                    try:
-                        os.remove(f)
-                    except Exception:
-                        pass
-
-                # ---------------------------------------
-                # 4. Stage aggregated CANOE database
-                # ---------------------------------------
-
-                staged_db = os.path.join(
-                    rep_input_dir,
-                    os.path.basename(aggregated_db)
-                )
-
-                shutil.copy2(
-                    aggregated_db,
-                    staged_db
-                )
-
-                if not os.path.isfile(staged_db):
-                    raise FileNotFoundError(
-                        "Failed to stage database for "
-                        f"Representative Periods: {staged_db}"
-                    )
-
-                print(
-                    f"Representative Periods input: "
-                    f"{staged_db}"
-                )
-
-                # ---------------------------------------
-                # 5. Run Representative Period processing
-                # ---------------------------------------
-
-                rep_process_all.run(
-                    run_clustering=False
-                )
-
-                # ---------------------------------------
-                # 6. Find Representative Period output
-                # ---------------------------------------
-
+                
                 final_p = rep_final_periods.value
-
-                out_files = glob.glob(
-                    os.path.join(
-                        rep_output_dir,
-                        "*.sqlite"
-                    )
-                )
-
-                if not out_files:
-                    raise FileNotFoundError(
-                        "Representative Period processing "
-                        "completed but no output SQLite "
-                        f"database was found in {rep_output_dir}"
-                    )
-
-                res_db = out_files[0]
-
-                # ---------------------------------------
-                # 7. Copy final database to requested dir
-                # ---------------------------------------
 
                 if output_filename.lower().endswith(
                     ".sqlite"
@@ -1005,10 +954,29 @@ def main(page: ft.Page) -> None:
                         + f"_{final_p}d.sqlite"
                     )
 
-                shutil.copy2(
-                    res_db,
-                    new_out_path
+                # ---------------------------------------
+                # 4. Run Representative Period processing
+                # ---------------------------------------
+
+                print(
+                    f"Representative Periods input: "
+                    f"{aggregated_db}"
                 )
+
+                rep_process_all.run(
+                    run_clustering=False,
+                    input_path=aggregated_db,
+                    output_path=new_out_path
+                )
+
+                if not os.path.isfile(new_out_path):
+                    raise FileNotFoundError(
+                        "Representative Period processing "
+                        "completed but no output SQLite "
+                        f"database was found at {new_out_path}"
+                    )
+
+                res_db = new_out_path
 
                 rep_status_text.value = (
                     f"Success! Output at: {new_out_path}"
@@ -1048,7 +1016,8 @@ def main(page: ft.Page) -> None:
         ft.Container(height=10),
         ft.Row([rep_test_periods, rep_final_periods], alignment=ft.MainAxisAlignment.CENTER),
         ft.Row([rep_days_per_period, rep_clustering_method], alignment=ft.MainAxisAlignment.CENTER),
-        ft.Row([rep_rerun_clustering, rep_show_plots], alignment=ft.MainAxisAlignment.CENTER),
+        ft.Row([rep_rerun_clustering, rep_show_plots, rep_use_pca], alignment=ft.MainAxisAlignment.CENTER),
+        ft.Row([weather_dropdown], alignment=ft.MainAxisAlignment.CENTER),
         ft.Divider(),
         ft.Row([btn_init, btn_run], alignment=ft.MainAxisAlignment.CENTER, spacing=30),
         ft.Row([rep_status_text], alignment=ft.MainAxisAlignment.CENTER),

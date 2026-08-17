@@ -16,46 +16,46 @@ use_pca: true
 pca_groups:
 - name: weather
   columns:
-  - ab_wind_speed
-  - bc_wind_speed
-  - mb_wind_speed
-  - sk_wind_speed
   - ab_irradiance_surface
-  - bc_irradiance_surface
-  - mb_irradiance_surface
-  - sk_irradiance_surface
   - ab_humidity
-  - bc_humidity
-  - mb_humidity
-  - sk_humidity
   - ab_temperature
+  - ab_wind_speed
+  - bc_irradiance_surface
+  - bc_humidity
   - bc_temperature
+  - bc_wind_speed
+  - mb_irradiance_surface
+  - mb_humidity
   - mb_temperature
-  - sk_temperature
-  - nb_wind_speed
-  - nllab_wind_speed
-  - ns_wind_speed
-  - on_wind_speed
-  - pei_wind_speed
-  - qc_wind_speed
+  - mb_wind_speed
   - nb_irradiance_surface
-  - nllab_irradiance_surface
-  - ns_irradiance_surface
-  - on_irradiance_surface
-  - pei_irradiance_surface
-  - qc_irradiance_surface
   - nb_humidity
-  - nllab_humidity
-  - ns_humidity
-  - on_humidity
-  - pei_humidity
-  - qc_humidity
   - nb_temperature
+  - nb_wind_speed
+  - nllab_irradiance_surface
+  - nllab_humidity
   - nllab_temperature
+  - nllab_wind_speed
+  - ns_irradiance_surface
+  - ns_humidity
   - ns_temperature
+  - ns_wind_speed
+  - on_irradiance_surface
+  - on_humidity
   - on_temperature
+  - on_wind_speed
+  - pei_irradiance_surface
+  - pei_humidity
   - pei_temperature
+  - pei_wind_speed
+  - qc_irradiance_surface
+  - qc_humidity
   - qc_temperature
+  - qc_wind_speed
+  - sk_irradiance_surface
+  - sk_humidity
+  - sk_temperature
+  - sk_wind_speed
   n_components: 6
 force_days: null
 extreme_periods:

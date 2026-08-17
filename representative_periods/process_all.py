@@ -22,7 +22,7 @@ def reset_state():
     database_processing_v4_0.reset()
 
 
-def run(run_clustering=True):
+def run(run_clustering=True, input_path=None, output_path=None):
     # Reload config so changes made by the CANOE UI are picked up
     utils.reload_config()
 
@@ -33,10 +33,15 @@ def run(run_clustering=True):
     if run_clustering:
         clustering.run()
 
-    database_processing.process_all()
-    database_processing_v3.process_all()
-    database_processing_v3_1.process_all()
-    database_processing_v4_0.process_all()
+    if input_path and output_path:
+        for mod in [database_processing, database_processing_v3, database_processing_v3_1, database_processing_v4_0]:
+            if mod.process_all(input_path, output_path):
+                break
+    else:
+        database_processing.process_all()
+        database_processing_v3.process_all()
+        database_processing_v3_1.process_all()
+        database_processing_v4_0.process_all()
 
     print("All processing completed.")
 
