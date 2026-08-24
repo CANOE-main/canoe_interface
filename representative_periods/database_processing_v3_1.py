@@ -368,7 +368,7 @@ def _get_schema_version(database):
 
 def period_to_days(period: str):
 
-    if "-" not in period: return (period)
+    if "-" not in period: return (period,)
     else:
         days = [utils.destringify_day(day) for day in period.split("-")]
         days = [utils.stringify_day(day) for day in range(days[0],days[1]+1,1)]
