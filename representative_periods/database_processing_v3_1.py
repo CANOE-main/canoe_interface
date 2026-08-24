@@ -5,14 +5,16 @@ Aligns a Temoa database with representative days configured in days.csv
 import sqlite3
 import os
 import pandas as pd
-import utils
+from . import utils
 import sys
 import math
 
 this_dir = os.path.realpath(os.path.dirname(__file__)) + "/"
 input_dir = input_dir = this_dir + "input_sqlite/"
 output_dir = this_dir + "output_sqlite/"
-
+def reset():
+    global initialised
+    initialised = False
 schema = this_dir + "canoe_schema_v3_1.sql"
 
 df_period: pd.DataFrame
@@ -121,17 +123,25 @@ def init():
 
 
 
-def process_all():
+def process_all(input_path: str = None, output_path: str = None):
     init()
+    
+    if input_path and output_path:
+        ver = _get_schema_version_for_path(input_path)
+        if ver != (3, 1): return False
+        print(f"Processing {input_path}...")
+        process_database(database=None, input_path=input_path, output_path=output_path)
+        return True
+
     databases = _get_sqlite_databases()
     for database in databases: process_database(database)
     print("\nFinished.\n")
 
 
 
-def process_database(database: str):
+def process_database(database: str, input_path: str = None, output_path: str = None):
 
-    if _get_schema_version(database) != (3, 1): return
+    if not input_path and _get_schema_version(database) != (3, 1): return
 
     init()
 
@@ -143,7 +153,7 @@ def process_database(database: str):
     if n_hours < 100: hours = [utils.stringify_hour(hour+1) for hour in range(n_hours)]
     else: hours = [utils.stringify_day(hour+1).replace("D","H") for hour in range(n_hours)]
 
-    if utils.config['days_per_period'] == 1 or utils.config['disaggregate_multiday']: process_single_day_period(database, hours)
+    if utils.config['days_per_period'] == 1 or utils.config['disaggregate_multiday']: process_single_day_period(database, hours, input_path, output_path)
     elif utils.config['days_per_period'] > 1:
         print("Multiday periods are not currently supported by Temoa. Turn on dissaggregate_multiday.")
         return
@@ -151,9 +161,12 @@ def process_database(database: str):
 
 
 
-def process_single_day_period(database: str, hours: list):
+def process_single_day_period(database: str, hours: list, input_path: str = None, output_path: str = None):
 
-    out_file = output_dir + database + f"_{len(df_period)}d.sqlite"
+    if output_path:
+        out_file = output_path
+    else:
+        out_file = output_dir + database + f"_{len(df_period)}d.sqlite"
 
     # Check if database exists or needs to be built
     build_db = not os.path.exists(out_file)
@@ -170,7 +183,10 @@ def process_single_day_period(database: str, hours: list):
         curs.executescript(open(schema, 'r').read())
 
     conn.commit()
-    conn.execute(f"ATTACH DATABASE '{input_dir + database + '.sqlite'}' AS dbin") # Attach the input database
+    if input_path:
+        conn.execute(f"ATTACH DATABASE '{input_path}' AS dbin")
+    else:
+        conn.execute(f"ATTACH DATABASE '{input_dir + database + '.sqlite'}' AS dbin") # Attach the input database
     conn.execute('PRAGMA foreign_keys = 0;') # Turn off foreign keys while copying over
 
     in_tables = [t[0] for t in curs.execute("SELECT name FROM dbin.sqlite_master WHERE type='table';").fetchall()]
@@ -366,3 +382,17 @@ if __name__ == "__main__":
     else:
         process_database(sys.argv[1])
         print("Finished.")
+
+def _get_schema_version_for_path(path):
+    conn = sqlite3.connect(path)
+    curs = conn.cursor()
+    tables = {t[0].lower() for t in curs.execute("SELECT name FROM sqlite_schema").fetchall()}
+    if 'metadata' not in tables:
+        return 0
+    try:
+        mj_vers = curs.execute("SELECT value FROM metadata WHERE element = 'DB_MAJOR' COLLATE NOCASE").fetchone()
+        mn_vers = curs.execute("SELECT value FROM metadata WHERE element = 'DB_MINOR' COLLATE NOCASE").fetchone()
+        if mj_vers is None or mn_vers is None: return 0
+        return int(mj_vers[0]), int(mn_vers[0])
+    except Exception:
+        return 0

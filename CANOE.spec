@@ -2,9 +2,33 @@
 import sys
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('assets', 'assets')]
+datas = [
+    ('assets', 'assets'),
+
+    # Representative Periods configuration
+    (
+        'representative_periods/config.yaml',
+        'representative_periods'
+    ),
+
+    # SQL schemas used by Representative Periods
+    (
+        'representative_periods/canoe_schema_v3_1.sql',
+        'representative_periods'
+    ),
+    (
+        'representative_periods/canoe_schema_v4_0.sql',
+        'representative_periods'
+    ),
+
+    # Time-series input data
+    (
+        'representative_periods/timeseries',
+        'representative_periods/timeseries'
+    ),
+]
 binaries = []
-hiddenimports = []
+hiddenimports = ['matplotlib.backends.backend_pdf']
 tmp_ret = collect_all('flet')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('flet_core')

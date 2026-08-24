@@ -6,9 +6,11 @@ import sqlite3
 import os
 import pandas as pd
 import shutil
-import utils
+from . import utils
 import sys
-
+def reset():
+    global initialised
+    initialised = False
 this_dir = os.path.realpath(os.path.dirname(__file__)) + "/"
 input_dir = this_dir + "input_sqlite/"
 output_dir = this_dir + "output_sqlite/"
@@ -43,24 +45,39 @@ def init():
 
 
 
-def process_all():
+def process_all(input_path: str = None, output_path: str = None):
     init()
+    
+    if input_path and output_path:
+        ver = _get_schema_version_for_path(input_path)
+        if ver != (3, 0): return False
+        print(f"Processing {input_path}...")
+        process_database(database=None, input_path=input_path, output_path=output_path)
+        return True
+
     databases = _get_sqlite_databases()
     for database in databases: process_database(database)
     print("\nFinished.\n")
 
 
 
-def process_database(database: str):
+def process_database(database: str, input_path: str = None, output_path: str = None):
 
-    if _get_schema_version(database) != (3, 0): return
+    if not input_path and _get_schema_version(database) != (3, 0): return
 
     init()
 
     print(f"Processing {database}...")
 
     # Copy the input database to the output directory and connect
-    shutil.copy(input_dir + f"{database}.sqlite", output_dir + f"{database}.sqlite", )
+    
+    if input_path and output_path:
+        shutil.copy(input_path, output_path)
+        db_path = output_path
+    else:
+        shutil.copy(input_dir + f"{database}.sqlite", output_dir + f"{database}.sqlite")
+        db_path = output_dir + f"{database}.sqlite"
+
 
     if utils.config['disaggregate_multiday']: n_hours = 24
     else: n_hours = 24*utils.config['days_per_period']
@@ -68,20 +85,20 @@ def process_database(database: str):
     if n_hours < 100: hours = [utils.stringify_hour(hour+1) for hour in range(n_hours)]
     else: hours = [utils.stringify_day(hour+1).replace("D","H") for hour in range(n_hours)]
 
-    if utils.config['days_per_period'] == 1 or utils.config['disaggregate_multiday']: process_single_day_period(database, hours)
-    elif utils.config['days_per_period'] > 1: process_multiday_period(database, hours)
+    if utils.config['days_per_period'] == 1 or utils.config['disaggregate_multiday']: process_single_day_period(database, hours, input_path, output_path)
+    elif utils.config['days_per_period'] > 1: process_multiday_period(database, hours, db_path)
 
     # Vacuum to clean up empty data
-    conn = sqlite3.connect(output_dir + f"{database}.sqlite")
+    conn = sqlite3.connect(db_path)
     conn.execute("VACUUM;")
     conn.commit()
     conn.close()
 
 
 
-def process_multiday_period(database, hours):
+def process_multiday_period(database, hours, db_path):
 
-    conn = sqlite3.connect(output_dir + f"{database}.sqlite")
+    conn = sqlite3.connect(db_path)
     curs = conn.cursor()
 
     # Horrible how can this curse live on
@@ -191,9 +208,9 @@ def process_multiday_period(database, hours):
 
 
 
-def process_single_day_period(database, hours):
+def process_single_day_period(database, hours, input_path, output_path):
 
-    conn = sqlite3.connect(output_dir + f"{database}.sqlite")
+    conn = sqlite3.connect(db_path)
     curs = conn.cursor()
 
     # Horrible how can this curse live on
@@ -309,3 +326,17 @@ if __name__ == "__main__":
     else:
         process_database(sys.argv[1])
         print("Finished.")
+
+def _get_schema_version_for_path(path):
+    conn = sqlite3.connect(path)
+    curs = conn.cursor()
+    tables = {t[0].lower() for t in curs.execute("SELECT name FROM sqlite_schema").fetchall()}
+    if 'metadata' not in tables:
+        return 0
+    try:
+        mj_vers = curs.execute("SELECT value FROM metadata WHERE element = 'DB_MAJOR' COLLATE NOCASE").fetchone()
+        mn_vers = curs.execute("SELECT value FROM metadata WHERE element = 'DB_MINOR' COLLATE NOCASE").fetchone()
+        if mj_vers is None or mn_vers is None: return 0
+        return int(mj_vers[0]), int(mn_vers[0])
+    except Exception:
+        return 0

@@ -1,16 +1,21 @@
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as pp
-import feature_selection as fi
+from . import feature_selection as fi
+from . import utils
+from . import pca
+
 import tsam.timeseriesaggregation as tsam
-import utils
-import pca
 import os
 
 this_dir = os.path.realpath(os.path.dirname(__file__)) + "/"
 out_data = this_dir + "clustering_output_data/"
 
 initialised = False
-
+def reset():
+    global initialised
+    initialised = False
 
 
 def init():
