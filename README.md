@@ -60,6 +60,10 @@ pip install -r requirements.txt
 
 ---
 
+## Fixing package for Representative Periods
+
+Inside the representative_periods folder, there is a file called timeseriesaggregation.py, copy it and paste into venv\Lib\site-packages\tsam. If you don't do this then the representative periods section will not work. 
+
 ## Running the app in Python
 
 Once dependencies are installed, launch the app with:
