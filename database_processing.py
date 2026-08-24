@@ -43,7 +43,7 @@ def collect_db_data_ids(db_path: str) -> Set[str]:
     try:
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
-        cur.execute("SELECT data_id FROM DataSet")
+        cur.execute("SELECT data_id FROM data_set")
         ids = {id[0][0:-3] for id in cur.fetchall()}
     except Exception as e:
         logger.exception("collect_db_data_ids failed for %s: %s", db_path, e)
@@ -59,7 +59,7 @@ def collect_latest_id(db_path: str, base_id: str) -> str:
     try:
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
-        cur.execute("SELECT data_id FROM DataSet WHERE data_id LIKE ?", (f"{base_id}%",))
+        cur.execute("SELECT data_id FROM data_set WHERE data_id LIKE ?", (f"{base_id}%",))
         for id in cur.fetchall():
             version = int(id[0][-3:])
             if version > latest_version:
@@ -105,10 +105,35 @@ def get_latest_data_ids(
     From a set of data IDs without versions, get the latest versioned IDs available in the input DB
     """
     viable_ids = get_viable_data_ids(input_filename, desired_ids)
-    latest_ids = sorted(set(
-        collect_latest_id(input_filename, base_id)
-        for base_id in viable_ids
-    ))
+    def data_id_priority(data_id: str) -> tuple:
+        """
+        Define insertion priority for CANOE data sets.
+        Lower numbers are inserted first and therefore take precedence
+        when INSERT OR IGNORE encounters duplicate primary keys.
+        """
+        priorities = {
+            "ELC": 1,
+            "IND": 2,
+            "COM": 3,
+            "RES": 4,
+            "TRP": 5,
+            "AGRI": 6,
+            "FUEL": 7,
+        }
+
+        for prefix, priority in priorities.items():
+            if data_id.startswith(prefix):
+                return priority, data_id
+
+        return 999, data_id
+    
+    latest_ids = sorted(
+        set(
+            collect_latest_id(input_filename, base_id)
+            for base_id in viable_ids
+        ),
+        key=data_id_priority
+    )
     logger.debug("Transferring the following data_IDs: %s", latest_ids)
     return latest_ids
 
@@ -196,15 +221,15 @@ def aggregate_sqlite_files(
             n += 1
             new_parents = {
                 d[0] for d in curs.execute((
-                    "SELECT parent_id FROM DataSet "
+                    "SELECT parent_id FROM data_set "
                     "WHERE parent_id NOT IN " 
-                    "(SELECT data_id FROM DataSet);"
-                )).fetchall()
+                    "(SELECT data_id FROM data_set);"
+                )).fetchall() if d[0] is not None
             }
             if len(new_parents) == 0:
                 break
             for data_id in new_parents:
-                cmd = f"INSERT OR IGNORE INTO DataSet SELECT * FROM dataset.DataSet WHERE data_id == '{data_id}';"
+                cmd = f"INSERT OR IGNORE INTO data_set SELECT * FROM dataset.data_set WHERE data_id == '{data_id}';"
                 curs.execute(cmd)
                 conn.commit()
 
@@ -258,9 +283,13 @@ def post_process(
             bad_rt = curs.execute(
                 """
                 SELECT DISTINCT region, tech
-                FROM Efficiency 
-                WHERE output_comm NOT IN (SELECT name FROM Commodity WHERE flag = 'd')
-                  AND (region, output_comm) NOT IN (SELECT region, input_comm FROM Efficiency)
+                FROM efficiency
+                WHERE output_comm NOT IN (
+                    SELECT name FROM commodity WHERE flag = 'd'
+                )
+                AND (region, output_comm) NOT IN (
+                    SELECT region, input_comm FROM efficiency
+                )
                 """
             ).fetchall()
             if not bad_rt:
@@ -293,8 +322,8 @@ def post_process(
                         except sqlite3.Error:
                             pass
 
-            tech_remaining = {t[0] for t in curs.execute('SELECT DISTINCT tech FROM Efficiency').fetchall()}
-            tech_before    = {t[0] for t in curs.execute('SELECT DISTINCT tech FROM Technology').fetchall()}
+            tech_remaining = {t[0] for t in curs.execute('SELECT DISTINCT tech FROM efficiency').fetchall()}
+            tech_before    = {t[0] for t in curs.execute('SELECT DISTINCT tech FROM technology').fetchall()}
             tech_gone = tech_before - tech_remaining
             if tech_gone:
                 logger.debug(
@@ -332,25 +361,25 @@ def post_process(
                 conn.close()
                 return
 
-            time_all = [int(p[0]) for p in curs.execute('SELECT period FROM TimePeriod').fetchall()]
+            time_all = [int(p[0]) for p in curs.execute('SELECT period FROM time_period').fetchall()]
 
             lifetime_process: Dict[Tuple[str,str,int], int] = {}
 
-            for r, t, v in curs.execute('SELECT region, tech, vintage FROM Efficiency').fetchall():
+            for r, t, v in curs.execute('SELECT region, tech, vintage FROM efficiency').fetchall():
                 lifetime_process[(r, t, int(v))] = LTT_DEFAULT
 
-            for r, t, ltt in curs.execute('SELECT region, tech, lifetime FROM LifetimeTech').fetchall():
+            for r, t, ltt in curs.execute('SELECT region, tech, lifetime FROM lifetime_tech').fetchall():
                 for v in time_all:
                     lifetime_process[(r, t, int(v))] = int(ltt)
 
-            for r, t, v, ltp in curs.execute('SELECT region, tech, vintage, lifetime FROM LifetimeProcess').fetchall():
+            for r, t, v, ltp in curs.execute('SELECT region, tech, vintage, lifetime FROM lifetime_process').fetchall():
                 lifetime_process[(r, t, int(v))] = int(ltp)
 
-            df_eff = pd.read_sql_query('SELECT * FROM Efficiency', conn)
+            df_eff = pd.read_sql_query('SELECT * FROM efficiency', conn)
             df_eff['vintage'] = pd.to_numeric(df_eff['vintage'], errors='coerce').fillna(0).astype(int)
 
             df_eff['last_out'] = [
-                snap5_max2045(v + int(lifetime_process[r, t, v]))
+                snap5_max2045(v + int(lifetime_process.get((r, t, v), LTT_DEFAULT)))
                 for r, t, v in df_eff[['region','tech','vintage']].itertuples(index=False, name=None)
             ]
 
@@ -358,7 +387,7 @@ def post_process(
             df_eff = df_eff.merge(df_last_in, left_on=['region','output_comm'], right_index=True, how='left')
             df_eff['last_in'] = pd.to_numeric(df_eff['last_in'], errors='coerce').fillna(0).astype(int)
 
-            demand_comms = {c[0] for c in curs.execute("SELECT name FROM Commodity WHERE flag = 'd'").fetchall()}
+            demand_comms = {c[0] for c in curs.execute("SELECT name FROM commodity WHERE flag = 'd'").fetchall()}
             df_eff = df_eff.loc[~df_eff['output_comm'].isin(demand_comms)].copy()
             
             df_remove = df_eff.loc[df_eff['last_in'] < df_eff['last_out']].copy()
@@ -379,14 +408,14 @@ def post_process(
             
                 curs.execute(
                     """
-                    DELETE FROM Efficiency
+                    DELETE FROM efficiency
                     WHERE region = ? AND input_comm = ? AND tech = ?
                         AND CAST(vintage AS INTEGER) = ?
                         AND output_comm = ?
                     """, (region, input_comm, tech, int(vintage), output_comm)
                 )
                 if curs.rowcount and curs.rowcount > 0: deleted_total += curs.rowcount
-                for tbl in ("CostVariable", "CostFixed", "EmissionActivity"):
+                for tbl in ("cost_variable", "cost_fixed", "emission_activity"):
 
                     if not global_settings.get("is_processing", True):
                         conn.close()
@@ -412,10 +441,10 @@ def post_process(
 
         # Delete any unused commodities (techs already cleaned up)
         curs.execute(
-            "DELETE FROM Commodity "
+            "DELETE FROM commodity "
             "WHERE flag != 'e' "
-                "AND name NOT IN (SELECT DISTINCT input_comm FROM Efficiency) "
-                "AND name NOT IN (SELECT DISTINCT output_comm FROM Efficiency)"
+                "AND name NOT IN (SELECT DISTINCT input_comm FROM efficiency) "
+                "AND name NOT IN (SELECT DISTINCT output_comm FROM efficiency)"
         )
         conn.commit()
 

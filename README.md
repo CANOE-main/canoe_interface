@@ -9,8 +9,9 @@ The app provides a simple graphical interface (built with [Flet](https://flet.de
 ## Features
 
 - **Cross-platform UI:** built with Flet (runs as a Python script or compiled Windows executable).
+- **Unified Pipeline:** process database aggregation and representative period clustering (via TSAM) in one tool.
 - **Automatic logging:** every session writes a timestamped log file for debugging and tracking.  
-- **Platform-aware directories:** logs, config, and assets are stored in appropriate locations for Python and compiled builds.  
+- **Platform-aware directories:** logs, config, plots, and assets are stored in appropriate locations for Python and compiled builds.  
 - **Database schema support:** automatically loads a bundled `schema.sql` file used for SQLite setup.  
 - **Config persistence:** saves UI options and state to a JSON configuration file.  
 
@@ -26,6 +27,7 @@ The app provides a simple graphical interface (built with [Flet](https://flet.de
 ├── log_setup.py           # Global logging configuration
 ├── constants.py           # Shared enums and constants
 ├── requirements.txt       # Python dependencies
+├── representative_periods/# TSAM clustering scripts and logic
 ├── assets/
 │   └── schema.sql         # SQL schema used by the database
 ├── logs/                  # Log output (created automatically)
@@ -80,11 +82,20 @@ Configuration files will be created in:
 
 ## Using the App
 
-When the window opens:
-- **Select model directories or inputs** — depending on the UI options available in your version of the interface.
+When the window opens, you will have access to two main tabs:
+
+### 1. Aggregation Tab
+- **Select model inputs and outputs** — provide the paths for your input dataset and desired output CANOE database.
 - **Select region-sector-scenario configurations** — determines the resolution of the output CANOE model.
-- **Click submit to process** — The input dataset will be processed into the output database
-- **View logs** in the terminal or in the `logs/` folder.
+- **Submit** — runs the aggregation pipeline to generate a standard database.
+
+### 2. Representative Periods Tab
+- **Configure Clustering** — define your target Test Periods, Final Periods, Clustering Method (e.g., hierarchical, k_means), and Days per Period.
+- **Initialize (Cluster Only)** — executes just the TSAM clustering scripts.
+- **Run (Aggregate & Cluster)** — runs an end-to-end pipeline: aggregation -> clustering -> final output database processing.
+- **Output Console** — streams all script output (stdout/stderr) so you can watch clustering progress in real-time.
+
+*Note: Any generated plots (duration curves, timeseries) will be saved directly to the `clustering_plots` directory in your appdata folder.*
 
 If you’re running a **compiled executable**, logs and config are stored in your user directories (via `platformdirs`):
 

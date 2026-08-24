@@ -6,11 +6,20 @@ By David Turnbull
 
 from __future__ import annotations
 
-import subprocess
+import matplotlib
+matplotlib.use('Agg')
+
+from representative_periods import clustering as rep_clustering
+from representative_periods import process_all as rep_process_all
+from representative_periods import utils as rep_utils
 import json
 import os
 import sys
 import atexit
+import shutil
+import glob
+import yaml
+import threading
 from typing import Any, Dict, Set, Tuple
 import flet as ft
 from time import sleep
@@ -86,7 +95,7 @@ def rs_active(
 def get_matrix_selection(
     matrix: Dict[Tuple[str, str], ft.Dropdown],
     global_settings: Dict[str, Any],
-) -> Set[Sector, Variant, Feature, Region, Region]:
+) -> Set[str]:
     """
     1. Get the active region-sector combos and their generic (non-regional) variant
     2. If only electricity in a region, add grid demand
@@ -98,7 +107,7 @@ def get_matrix_selection(
     # Get the low-res scenario
     low_scenario = global_settings.get("low_scenario", DEFAULT_LOW)
 
-    selections: Set[Sector, Variant, Feature, Region, Region] = set()
+    selections: Set[Tuple[Sector, Variant, Feature, Region, Region]] = set()
     regions: Set[Region] = set()
     for r in TABLE_REGIONS:
         for s in TABLE_SECTORS:
@@ -583,6 +592,7 @@ def main(page: ft.Page) -> None:
     # Controls
     reset_button = ft.ElevatedButton("Reset Matrix", on_click=reset_matrix, width=200, height=40)
     submit_button = ft.ElevatedButton("Submit", on_click=on_submit, width=80, height=40)
+    submit_label = ft.Text("Runs without representative periods", size=12, italic=True)
 
     # Settings column
     settings_column = ft.Column(
@@ -621,24 +631,428 @@ def main(page: ft.Page) -> None:
     footer = ft.Container(
         height=50,  # <-- fixed footer height
         content=ft.Row(
-            [in_filename_text_field, out_filename_text_field, submit_button, status_text],
+            [in_filename_text_field, out_filename_text_field, submit_button, submit_label, status_text],
             alignment=ft.MainAxisAlignment.CENTER,
             spacing=30,
         ),
         alignment=ft.alignment.center,
     )
 
+    rep_dir = os.path.abspath(
+    os.path.join(
+        os.path.dirname(__file__),
+        "representative_periods"
+    )
+    )
+
+    rep_config_path = os.path.join(
+        rep_dir,
+        "config.yaml"
+    )
+
+    rep_input_dir = os.path.join(
+        rep_dir,
+        "input_sqlite"
+    )
+
+    rep_output_dir = os.path.join(
+        rep_dir,
+        "output_sqlite"
+    )
+
+    rep_clustering_output_dir = os.path.join(
+        rep_dir,
+        "clustering_output_data"
+    )
+
+    # PyInstaller does not preserve empty directories,
+    # so create working directories at runtime.
+    os.makedirs(rep_input_dir, exist_ok=True)
+    os.makedirs(rep_output_dir, exist_ok=True)
+    os.makedirs(rep_clustering_output_dir, exist_ok=True)
+
+    def load_rep_config():
+        try:
+            with open(rep_config_path, "r", encoding="utf-8") as f:
+                return yaml.load(f, Loader=yaml.Loader)
+        except Exception:
+            return {}
+
+    def save_rep_config(cfg):
+        with open(rep_config_path, "w", encoding="utf-8") as f:
+            yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
+
+    rep_cfg = load_rep_config()
+    
+    default_test_periods = rep_cfg.get("test_periods", [1, 2, 4, 8, 16, 32])
+    if not isinstance(default_test_periods, list):
+        default_test_periods = [1, 2, 4, 8, 16, 32]
+        
+    rep_test_periods = ft.TextField(
+        label="Test Periods (comma separated)", 
+        value=", ".join(map(str, default_test_periods)), 
+        width=300
+    )
+    
+    rep_final_periods = ft.Dropdown(
+        label="Final Periods", 
+        value=str(rep_cfg.get("final_periods", 16)), 
+        width=150,
+        options=[ft.dropdown.Option(str(p)) for p in default_test_periods]
+    )
+
+    def on_test_periods_change(e):
+        try:
+            val_str = rep_test_periods.value
+            new_periods = [int(x.strip()) for x in val_str.split(",") if x.strip().isdigit()]
+            if new_periods:
+                rep_final_periods.options = [ft.dropdown.Option(str(p)) for p in new_periods]
+                if rep_final_periods.value not in [str(p) for p in new_periods]:
+                    rep_final_periods.value = str(new_periods[0])
+                page.update()
+        except Exception:
+            pass
+
+    rep_test_periods.on_change = on_test_periods_change
+    
+    rep_clustering_method = ft.Dropdown(
+        label="Clustering Method",
+        options=[ft.dropdown.Option(o) for o in ["hierarchical", "k_means", "k_medoids", "k_maxoids", "adjacent_periods"]],
+        value=rep_cfg.get("clustering_method", "hierarchical"),
+        width=200
+    )
+    rep_days_per_period = ft.TextField(label="Days Per Period", value=str(rep_cfg.get("days_per_period", 1)), width=150)
+    rep_rerun_clustering = ft.Checkbox(label="Rerun Clustering", value=rep_cfg.get("rerun_clustering", False))
+    rep_show_plots = ft.Checkbox(label="Show Plots", value=rep_cfg.get("show_plots", False))
+    rep_use_pca = ft.Checkbox(label="Use PCA", value=rep_cfg.get("use_pca", True))
+
+    pca_cols_in_cfg = []
+    if "pca_groups" in rep_cfg and len(rep_cfg["pca_groups"]) > 0:
+        pca_cols_in_cfg = rep_cfg["pca_groups"][0].get("columns", [])
+    
+    master_weather_cols = []
+    for region, cols in rep_cfg.get("timeseries", {}).items():
+        if cols:
+            for col in cols:
+                if any(x in col for x in ["wind_speed", "irradiance", "humidity", "temperature"]):
+                    if col not in master_weather_cols:
+                        master_weather_cols.append(col)
+
+    weather_checkboxes = {}
+    checkbox_list = []
+    for col in master_weather_cols:
+        is_checked = col in pca_cols_in_cfg if pca_cols_in_cfg else True 
+        cb = ft.Checkbox(label=col, value=is_checked)
+        weather_checkboxes[col] = cb
+        checkbox_list.append(cb)
+
+    weather_dropdown = ft.ExpansionTile(
+        title=ft.Text("Select Weather Columns for PCA"),
+        controls=[ft.Container(
+            content=ft.Column(checkbox_list, scroll=ft.ScrollMode.ADAPTIVE, height=200),
+            padding=10
+        )],
+        width=400
+    )
+
+    rep_status_text = ft.Text("")
+    
+    console_output = ft.ListView(expand=True, auto_scroll=True, spacing=2)
+    console_container = ft.Container(
+        content=console_output,
+        margin=10,
+        padding=10,
+        alignment=ft.alignment.top_left,
+        bgcolor="black87",
+        border_radius=5,
+        expand=True
+    )
+
+    class ConsoleRedirector:
+        def __init__(self, list_view, page):
+            self.list_view = list_view
+            self.page = page
+            self.buffer = ""
+        def write(self, text):
+            if not text: return
+            self.buffer += text
+            if "\n" in self.buffer:
+                lines = self.buffer.split("\n")
+                for line in lines[:-1]:
+                    self.list_view.controls.append(ft.Text(line, color="white", font_family="Consolas", size=12))
+                self.buffer = lines[-1]
+                self.page.update()
+        def flush(self):
+            pass
+
+    def apply_rep_ui_to_config():
+        cfg = load_rep_config()
+        try:
+            cfg["final_periods"] = int(rep_final_periods.value)
+        except: pass
+        try:
+            val_str = rep_test_periods.value
+            cfg["test_periods"] = [int(x.strip()) for x in val_str.split(",") if x.strip().isdigit()]
+        except: pass
+        cfg["clustering_method"] = rep_clustering_method.value
+        try:
+            cfg["days_per_period"] = int(rep_days_per_period.value)
+        except: pass
+        cfg["rerun_clustering"] = rep_rerun_clustering.value
+        cfg["show_plots"] = rep_show_plots.value
+        cfg["use_pca"] = rep_use_pca.value
+
+        selected_cols = [col for col, cb in weather_checkboxes.items() if cb.value]
+        if "pca_groups" not in cfg or not cfg["pca_groups"]:
+            cfg["pca_groups"] = [{"name": "weather", "columns": selected_cols, "n_components": 6}]
+        else:
+            cfg["pca_groups"][0]["columns"] = selected_cols
+
+        save_rep_config(cfg)
+
+    def on_initialize(e):
+        if global_settings["is_processing"]: return
+        global_settings["is_processing"] = True
+        rep_status_text.value = "Initializing Clustering..."
+        console_output.controls.clear()
+        page.update()
+        apply_rep_ui_to_config()
+        
+        def runner():
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
+
+            redirector = ConsoleRedirector(console_output, page)
+
+            sys.stdout = redirector
+            sys.stderr = redirector
+
+            try:
+                # config.yaml was just updated by apply_rep_ui_to_config()
+                rep_utils.reload_config()
+
+                # Previously the subprocess gave us a fresh module each run.
+                rep_clustering.reset()
+
+                rep_clustering.run(
+                    show_plots=rep_utils.config.get("show_plots", False)
+                )
+
+                rep_status_text.value = "Clustering initialized successfully!"
+
+            except Exception as ex:
+                rep_status_text.value = f"Error during clustering: {ex}"
+
+            finally:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+
+                global_settings["is_processing"] = False
+                page.update()
+
+        threading.Thread(target=runner, daemon=True).start()
+
+    def on_run_all(e):
+        if global_settings["is_processing"]:
+            return
+
+        rep_status_text.value = "Running Aggregation..."
+        console_output.controls.clear()
+        page.update()
+
+        global_settings["is_processing"] = True
+
+        input_filename = (
+            in_filename_text_field.value
+            .strip()
+            .strip("'")
+            .strip('"')
+        )
+
+        output_filename = (
+            out_filename_text_field.value
+            .strip()
+            .strip("'")
+            .strip('"')
+        )
+        if not output_filename.lower().endswith('.sqlite'):
+            output_filename += '.sqlite'
+
+        def runner():
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
+
+            redirector = ConsoleRedirector(
+                console_output,
+                page
+            )
+
+            sys.stdout = redirector
+            sys.stderr = redirector
+
+            try:
+                # ---------------------------------------
+                # 1. Run normal CANOE aggregation
+                # ---------------------------------------
+
+                save_config()
+
+                desired_ids = get_matrix_selection(
+                    matrix,
+                    global_settings
+                )
+
+                dbp.aggregate_sqlite_files(
+                    input_filename=input_filename,
+                    output_filename=output_filename,
+                    global_settings=global_settings,
+                    desired_ids=desired_ids,
+                )
+
+                aggregated_db = os.path.abspath(
+                    output_filename
+                )
+
+                if not os.path.isfile(aggregated_db):
+                    raise FileNotFoundError(
+                        "CANOE aggregation did not produce "
+                        f"the expected database: {aggregated_db}"
+                    )
+
+                print(
+                    f"Aggregation complete: {aggregated_db}"
+                )
+
+                rep_status_text.value = (
+                    "Aggregation complete. "
+                    "Running Representative Periods..."
+                )
+                page.update()
+
+                # ---------------------------------------
+                # 2. Save Representative Period settings
+                # ---------------------------------------
+
+                apply_rep_ui_to_config()
+
+                # ---------------------------------------
+                # 3. Determine output path
+                # ---------------------------------------
+                
+                final_p = rep_final_periods.value
+
+                if output_filename.lower().endswith(
+                    ".sqlite"
+                ):
+                    new_out_path = (
+                        output_filename[:-7]
+                        + f"_{final_p}d.sqlite"
+                    )
+                else:
+                    new_out_path = (
+                        output_filename
+                        + f"_{final_p}d.sqlite"
+                    )
+
+                # ---------------------------------------
+                # 4. Run Representative Period processing
+                # ---------------------------------------
+
+                print(
+                    f"Representative Periods input: "
+                    f"{aggregated_db}"
+                )
+
+                rep_process_all.run(
+                    run_clustering=False,
+                    input_path=aggregated_db,
+                    output_path=new_out_path
+                )
+
+                if not os.path.isfile(new_out_path):
+                    raise FileNotFoundError(
+                        "Representative Period processing "
+                        "completed but no output SQLite "
+                        f"database was found at {new_out_path}"
+                    )
+
+                res_db = new_out_path
+
+                rep_status_text.value = (
+                    f"Success! Output at: {new_out_path}"
+                )
+
+                print(
+                    f"Representative Periods complete: "
+                    f"{new_out_path}"
+                )
+
+            except Exception as ex:
+                import traceback
+                rep_status_text.value = (
+                    f"Error during Run All: {ex}\n\n{traceback.format_exc()}"
+                )
+
+                print(
+                    f"ERROR during Run All: {ex}"
+                )
+
+            finally:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+
+                global_settings["is_processing"] = False
+                page.update()
+
+        threading.Thread(
+            target=runner,
+            daemon=True
+        ).start()
+
+    btn_init = ft.ElevatedButton("Initialize (Cluster Only)", on_click=on_initialize)
+    btn_run = ft.ElevatedButton("Run (Aggregate & Process)", on_click=on_run_all)
+
+    rep_content = ft.Column([
+        ft.Container(height=10),
+        ft.Row([rep_test_periods, rep_final_periods], alignment=ft.MainAxisAlignment.CENTER),
+        ft.Row([rep_days_per_period, rep_clustering_method], alignment=ft.MainAxisAlignment.CENTER),
+        ft.Row([rep_rerun_clustering, rep_show_plots, rep_use_pca], alignment=ft.MainAxisAlignment.CENTER),
+        ft.Row([weather_dropdown], alignment=ft.MainAxisAlignment.CENTER),
+        ft.Divider(),
+        ft.Row([btn_init, btn_run], alignment=ft.MainAxisAlignment.CENTER, spacing=30),
+        ft.Row([rep_status_text], alignment=ft.MainAxisAlignment.CENTER),
+        console_container
+    ], expand=True, spacing=10, alignment=ft.MainAxisAlignment.START, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+
+    tabs = ft.Tabs(
+        selected_index=0,
+        animation_duration=300,
+        tabs=[
+            ft.Tab(
+                text="Aggregation",
+                content=ft.Column([
+                    ft.Text("CANOE RSS Selector", size=24, weight=ft.FontWeight.BOLD),
+                    ft.Text("Read accompanying document for details about choices and instructions", size=18),
+                    ft.Divider(),
+                    middle_row,
+                    ft.Divider(),
+                    footer,
+                ], expand=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+            ),
+            ft.Tab(
+                text="Representative Periods",
+                content=rep_content
+            ),
+        ],
+        expand=True,
+    )
+
     main_content = ft.Column(
         [
             image,
-            ft.Text("CANOE RSS Selector", size=24, weight=ft.FontWeight.BOLD),
-            ft.Text("Read accompanying document for details about choices and instructions", size=18),
-            ft.Divider(),
-            middle_row,  # expands
-            ft.Divider(),
-            footer,      # fixed height
+            tabs,
         ],
-        expand=True,  # <-- make the whole layout fill the window
+        expand=True,
         alignment=ft.MainAxisAlignment.START,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         spacing=10,

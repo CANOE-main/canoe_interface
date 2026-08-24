@@ -118,10 +118,10 @@ TABLE_REGIONS: List[Region] = sorted(
 #########################################
 
 INDEX_TABLES: Set[str] = {
-    'CommodityType','Operator','TechnologyType','TimePeriodType',
-    'DataQualityCredibility','DataQualityGeography',
-    'DataQualityStructure','DataQualityTechnology','DataQualityTime',
-    'TechnologyLabel','CommodityLabel','DataSourceLabel'
+    'commodity_type', 'operator', 'technology_type', 'time_period_type',
+    'data_quality_credibility', 'data_quality_geography',
+    'data_quality_structure', 'data_quality_technology', 'data_quality_time',
+    'metadata', 'metadata_real'
 }
 """SQLite tables that are handled by the schema and need not be transferred"""
 

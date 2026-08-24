@@ -1,0 +1,128 @@
+rerun_clustering: false
+show_plots: false
+days_per_period: 1
+disaggregate_multiday: true
+demand_preservation: hourly
+dsd_threshold: 0.01
+final_periods: 16
+test_periods:
+- 1
+- 2
+- 4
+- 8
+- 16
+- 32
+use_pca: true
+pca_groups:
+- name: weather
+  columns:
+  - ab_irradiance_surface
+  - ab_humidity
+  - ab_temperature
+  - ab_wind_speed
+  - bc_irradiance_surface
+  - bc_humidity
+  - bc_temperature
+  - bc_wind_speed
+  - mb_irradiance_surface
+  - mb_humidity
+  - mb_temperature
+  - mb_wind_speed
+  - nb_irradiance_surface
+  - nb_humidity
+  - nb_temperature
+  - nb_wind_speed
+  - nllab_irradiance_surface
+  - nllab_humidity
+  - nllab_temperature
+  - nllab_wind_speed
+  - ns_irradiance_surface
+  - ns_humidity
+  - ns_temperature
+  - ns_wind_speed
+  - on_irradiance_surface
+  - on_humidity
+  - on_temperature
+  - on_wind_speed
+  - pei_irradiance_surface
+  - pei_humidity
+  - pei_temperature
+  - pei_wind_speed
+  - qc_irradiance_surface
+  - qc_humidity
+  - qc_temperature
+  - qc_wind_speed
+  - sk_irradiance_surface
+  - sk_humidity
+  - sk_temperature
+  - sk_wind_speed
+  n_components: 6
+force_days: null
+extreme_periods:
+  max_peak: null
+  min_peak: null
+  max_mean: null
+  min_mean: null
+custom_features: null
+day_to_index: -1
+clustering_method: hierarchical
+timeseries:
+  ab:
+  - ab_irradiance_surface
+  - ab_humidity
+  - ab_temperature
+  - ab_wind_speed
+  bc:
+  - bc_irradiance_surface
+  - bc_humidity
+  - bc_temperature
+  - bc_wind_speed
+  mb:
+  - mb_irradiance_surface
+  - mb_humidity
+  - mb_temperature
+  - mb_wind_speed
+  nb:
+  - nb_irradiance_surface
+  - nb_humidity
+  - nb_temperature
+  - nb_wind_speed
+  nllab:
+  - nllab_irradiance_surface
+  - nllab_humidity
+  - nllab_temperature
+  - nllab_wind_speed
+  ns:
+  - ns_irradiance_surface
+  - ns_humidity
+  - ns_temperature
+  - ns_wind_speed
+  'on':
+  - on_irradiance_surface
+  - on_humidity
+  - on_temperature
+  - on_wind_speed
+  pei:
+  - pei_irradiance_surface
+  - pei_humidity
+  - pei_temperature
+  - pei_wind_speed
+  qc:
+  - qc_irradiance_surface
+  - qc_humidity
+  - qc_temperature
+  - qc_wind_speed
+  sk:
+  - sk_irradiance_surface
+  - sk_humidity
+  - sk_temperature
+  - sk_wind_speed
+  ontario:
+  - ldv_charging
+  temoa-canada: null
+model_years:
+- 2025
+- 2030
+- 2035
+- 2040
+- 2045

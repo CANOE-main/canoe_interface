@@ -1,1745 +1,254 @@
-PRAGMA foreign_keys= OFF;
+PRAGMA foreign_keys = OFF;
 BEGIN TRANSACTION;
 
-CREATE TABLE IF NOT EXISTS MetaData
+-- ============================================================
+-- Metadata
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS metadata
 (
     element TEXT PRIMARY KEY,
     value   INT,
     notes   TEXT
 );
-REPLACE INTO MetaData
-VALUES ('DB_MAJOR', 3, 'DB major version number');
-REPLACE INTO MetaData
-VALUES ('DB_MINOR', 1, 'DB minor version number');
-REPLACE INTO MetaData
-VALUES ('days_per_period', 365, 'count of days in each period');
+REPLACE INTO metadata VALUES ('DB_MAJOR', 4, 'DB major version number');
+REPLACE INTO metadata VALUES ('DB_MINOR', 0, 'DB minor version number');
 
-CREATE TABLE IF NOT EXISTS MetaDataReal
+CREATE TABLE IF NOT EXISTS metadata_real
 (
     element TEXT PRIMARY KEY,
     value   REAL,
     notes   TEXT
 );
-REPLACE INTO MetaDataReal
-VALUES ('global_discount_rate', 0.03, 'Canadian social discount rate');
-REPLACE INTO MetaDataReal
-VALUES ('default_loan_rate', 0.03, 'Matching GDR');
+REPLACE INTO metadata_real VALUES ('global_discount_rate', 0.03, 'Discount Rate for future costs');
+REPLACE INTO metadata_real VALUES ('default_loan_rate', 0.03, 'Default Loan Rate if not specified in loan_rate table');
 
-CREATE TABLE IF NOT EXISTS SeasonLabel
+-- ============================================================
+-- Label / registry tables
+-- ============================================================
+CREATE TABLE IF NOT EXISTS commodity_label
 (
-    season TEXT
-        PRIMARY KEY,
+    commodity TEXT PRIMARY KEY,
+    notes     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS technology_label
+(
+    tech  TEXT PRIMARY KEY,
+    notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS tech_group_label
+(
+    group_name TEXT PRIMARY KEY,
+    notes      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sector_label
+(
+    sector TEXT PRIMARY KEY,
     notes  TEXT
 );
-CREATE TABLE IF NOT EXISTS SectorLabel
+
+-- ============================================================
+-- Enum / type tables
+-- ============================================================
+CREATE TABLE IF NOT EXISTS commodity_type
 (
-    sector TEXT,
-    notes  TEXT,
-    PRIMARY KEY (sector)
+    label       TEXT PRIMARY KEY,
+    description TEXT
 );
-CREATE TABLE IF NOT EXISTS CapacityCredit
+REPLACE INTO commodity_type VALUES ('s',  'source commodity');
+REPLACE INTO commodity_type VALUES ('a',  'annual commodity');
+REPLACE INTO commodity_type VALUES ('p',  'physical commodity');
+REPLACE INTO commodity_type VALUES ('d',  'demand commodity');
+REPLACE INTO commodity_type VALUES ('e',  'emissions commodity');
+REPLACE INTO commodity_type VALUES ('w',  'waste commodity');
+REPLACE INTO commodity_type VALUES ('wa', 'waste annual commodity');
+REPLACE INTO commodity_type VALUES ('wp', 'waste physical commodity');
+
+CREATE TABLE IF NOT EXISTS technology_type
 (
-    region  TEXT,
-    period  INTEGER
-        REFERENCES TimePeriod (period),
-    tech    TEXT,
-    vintage INTEGER,
-    credit  REAL,
-    notes   TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, period, tech, vintage),
-    CHECK (credit >= 0 AND credit <= 1)
+    label       TEXT PRIMARY KEY,
+    description TEXT
 );
-CREATE TABLE IF NOT EXISTS CapacityFactorProcess
+REPLACE INTO technology_type VALUES ('p',  'production technology');
+REPLACE INTO technology_type VALUES ('pb', 'baseload production technology');
+REPLACE INTO technology_type VALUES ('ps', 'storage production technology');
+
+CREATE TABLE IF NOT EXISTS time_period_type
 (
-    region  TEXT,
-    period  INTEGER
-        REFERENCES TimePeriod (period),
-    season TEXT
-        REFERENCES SeasonLabel (season),
-    tod     TEXT
-        REFERENCES TimeOfDay (tod),
-    tech    TEXT,
-    vintage INTEGER,
-    factor  REAL,
-    notes   TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, period, season, tod, tech, vintage),
-    CHECK (factor >= 0 AND factor <= 1)
+    label       TEXT PRIMARY KEY,
+    description TEXT
 );
-CREATE TABLE IF NOT EXISTS CapacityFactorTech
+REPLACE INTO time_period_type VALUES ('e', 'existing vintages');
+REPLACE INTO time_period_type VALUES ('f', 'future');
+
+CREATE TABLE IF NOT EXISTS operator
 (
-    region TEXT,
-    period INTEGER
-        REFERENCES TimePeriod (period),
-    season TEXT
-        REFERENCES SeasonLabel (season),
-    tod    TEXT
-        REFERENCES TimeOfDay (tod),
-    tech   TEXT,
-    factor REAL,
-    notes  TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, period, season, tod, tech),
-    CHECK (factor >= 0 AND factor <= 1)
+    operator TEXT PRIMARY KEY,
+    notes    TEXT
 );
-CREATE TABLE IF NOT EXISTS CapacityToActivity
+REPLACE INTO operator VALUES ('e',  'equal to');
+REPLACE INTO operator VALUES ('le', 'less than or equal to');
+REPLACE INTO operator VALUES ('ge', 'greater than or equal to');
+
+-- ============================================================
+-- Data quality and data source tables (custom)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS data_quality_credibility
 (
-    region TEXT,
-    tech   TEXT,
-    c2a    REAL,
-    notes  TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, tech)
+    dq_cred     INTEGER PRIMARY KEY,
+    description TEXT
 );
-CREATE TABLE IF NOT EXISTS Commodity
+REPLACE INTO data_quality_credibility VALUES (1, 'Excellent - A trustworthy source backed by strong analysis or direct measurements.');
+REPLACE INTO data_quality_credibility VALUES (2, 'Good - Trustworthy source. Partly based on assumptions or imperfect analysis.');
+REPLACE INTO data_quality_credibility VALUES (3, 'Acceptable - Acceptable source. May rely on many assumptions, shallow analysis, or rough measurement.');
+REPLACE INTO data_quality_credibility VALUES (4, 'Lacking - Questionable or unverified source. Poorly measured or weak analysis.');
+REPLACE INTO data_quality_credibility VALUES (5, 'Unacceptable - No or untrustworthy source. Unsupported assumption.');
+
+CREATE TABLE IF NOT EXISTS data_quality_geography
+(
+    dq_geog     INTEGER PRIMARY KEY,
+    description TEXT
+);
+REPLACE INTO data_quality_geography VALUES (1, 'Excellent - From this region and at the correct aggregation level or a directly-applicable generic value.');
+REPLACE INTO data_quality_geography VALUES (2, 'Good - From an analogous region or the modelled region at incorrect aggregation level.');
+REPLACE INTO data_quality_geography VALUES (3, 'Acceptable - From a relevant but non-analogous region or highly aggregated.');
+REPLACE INTO data_quality_geography VALUES (4, 'Lacking - From a non-analogous region with limited relevance or a generic global value.');
+REPLACE INTO data_quality_geography VALUES (5, 'Unacceptable - From a region that is highly dissimilar to the modelled region, or from an unknown region.');
+
+CREATE TABLE IF NOT EXISTS data_quality_structure
+(
+    dq_struc    INTEGER PRIMARY KEY,
+    description TEXT
+);
+REPLACE INTO data_quality_structure VALUES (1, 'Excellent - Excellent representation of the system, as good or better than other models.');
+REPLACE INTO data_quality_structure VALUES (2, 'Good - Well modelled, in line with what others are doing.');
+REPLACE INTO data_quality_structure VALUES (3, 'Acceptable - Room for improved representation but works for now.');
+REPLACE INTO data_quality_structure VALUES (4, 'Lacking - Poorly represented, overly simplified.');
+REPLACE INTO data_quality_structure VALUES (5, 'Unacceptable - Placeholder or dummy representation. Essentially not represented.');
+
+CREATE TABLE IF NOT EXISTS data_quality_technology
+(
+    dq_tech     INTEGER PRIMARY KEY,
+    description TEXT
+);
+REPLACE INTO data_quality_technology VALUES (1, 'Excellent - For the modelled technology as represented. Directly applicable.');
+REPLACE INTO data_quality_technology VALUES (2, 'Good - For the same general technology but not perfectly representative.');
+REPLACE INTO data_quality_technology VALUES (3, 'Acceptable - For an analogous technology. Possibly a subset or general class. Roughly applicable.');
+REPLACE INTO data_quality_technology VALUES (4, 'Lacking - Loosely representative. A niche subset or overbroad general class of the technology.');
+REPLACE INTO data_quality_technology VALUES (5, 'Unacceptable - For a dissimilar or unknown technology. Unknown or poor applicability.');
+
+CREATE TABLE IF NOT EXISTS data_quality_time
+(
+    dq_time     INTEGER PRIMARY KEY,
+    description TEXT
+);
+REPLACE INTO data_quality_time VALUES (1, 'Excellent - From or directly applicable to the modelled time.');
+REPLACE INTO data_quality_time VALUES (2, 'Good - From a different but similar time or only slightly out of date. Still highly relevant.');
+REPLACE INTO data_quality_time VALUES (3, 'Acceptable - From a somewhat similar time or several years out of date but still relevant.');
+REPLACE INTO data_quality_time VALUES (4, 'Lacking - From a time with different conditions or significantly out of date. Questionable relevance.');
+REPLACE INTO data_quality_time VALUES (5, 'Unacceptable - From an irrelevant time or badly out of date.');
+
+CREATE TABLE IF NOT EXISTS data_source_label
+(
+    source_id TEXT PRIMARY KEY,
+    notes     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS data_set
+(
+    data_id     TEXT PRIMARY KEY,
+    label       TEXT,
+    version     TEXT,
+    description TEXT,
+    status      TEXT,
+    author      TEXT,
+    date        TEXT,
+    parent_id   TEXT
+        REFERENCES data_set (data_id),
+    changelog   TEXT,
+    notes       TEXT
+);
+
+CREATE TABLE IF NOT EXISTS data_source
+(
+    source_id TEXT,
+    source    TEXT,
+    notes     TEXT,
+    data_id   TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (source_id) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (source_id)
+);
+
+-- ============================================================
+-- Time tables
+-- ============================================================
+CREATE TABLE IF NOT EXISTS time_period
+(
+    sequence INTEGER UNIQUE,
+    period   INTEGER PRIMARY KEY,
+    flag     TEXT
+        REFERENCES time_period_type (label)
+);
+
+CREATE TABLE IF NOT EXISTS time_of_day
+(
+    sequence INTEGER UNIQUE,
+    tod      TEXT PRIMARY KEY,
+    hours    REAL NOT NULL DEFAULT 1,
+    notes    TEXT,
+    CHECK (hours > 0)
+);
+
+CREATE TABLE IF NOT EXISTS time_season
+(
+    sequence         INTEGER UNIQUE,
+    season           TEXT PRIMARY KEY,
+    segment_fraction REAL NOT NULL,
+    notes            TEXT,
+    CHECK (segment_fraction >= 0 AND segment_fraction <= 1)
+);
+
+CREATE TABLE IF NOT EXISTS time_season_sequential
+(
+    sequence         INTEGER UNIQUE,
+    seas_seq         TEXT PRIMARY KEY,
+    season           TEXT
+        REFERENCES time_season (season),
+    segment_fraction REAL NOT NULL,
+    notes            TEXT,
+    CHECK (segment_fraction >= 0 AND segment_fraction <= 1)
+);
+
+-- ============================================================
+-- Region
+-- ============================================================
+CREATE TABLE IF NOT EXISTS region
+(
+    region TEXT PRIMARY KEY,
+    notes  TEXT
+);
+
+-- ============================================================
+-- Core model definition tables
+-- ============================================================
+CREATE TABLE IF NOT EXISTS commodity
 (
     name        TEXT,
     flag        TEXT
-        REFERENCES CommodityType (label),
+        REFERENCES commodity_type (label),
     description TEXT,
-    data_id TEXT
-        REFERENCES DataSet (data_id),
+    units       TEXT,
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (name) REFERENCES commodity_label (commodity),
     PRIMARY KEY (name)
 );
-CREATE TABLE IF NOT EXISTS CommodityType
-(
-    label       TEXT PRIMARY KEY,
-    description TEXT
-);
-REPLACE INTO CommodityType
-VALUES ('s', 'source commodity');
-REPLACE INTO CommodityType
-VALUES ('a', 'annual commodity');
-REPLACE INTO CommodityType
-VALUES ('p', 'physical commodity');
-REPLACE INTO CommodityType
-VALUES ('d', 'demand commodity');
-REPLACE INTO CommodityType
-VALUES ('e', 'emissions commodity');
-REPLACE INTO CommodityType
-VALUES ('w', 'waste commodity');
-REPLACE INTO CommodityType
-VALUES ('wa', 'waste annual commodity');
-REPLACE INTO CommodityType
-VALUES ('wp', 'waste physical commodity');
-CREATE TABLE IF NOT EXISTS ConstructionInput
-(
-    region      TEXT,
-    input_comm   TEXT,
-    tech        TEXT,
-    vintage     INTEGER
-        REFERENCES TimePeriod (period),
-    value       REAL,
-    units       TEXT,
-    notes       TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    FOREIGN KEY (input_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (region, input_comm, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS CostEmission
-(
-    region    TEXT,
-    period    INTEGER
-        REFERENCES TimePeriod (period),
-    emis_comm TEXT NOT NULL,
-    cost      REAL NOT NULL,
-    units     TEXT,
-    notes     TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (emis_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (region, period, emis_comm)
-);
-CREATE TABLE IF NOT EXISTS CostFixed
-(
-    region  TEXT    NOT NULL,
-    period  INTEGER NOT NULL
-        REFERENCES TimePeriod (period),
-    tech    TEXT    NOT NULL,
-    vintage INTEGER NOT NULL
-        REFERENCES TimePeriod (period),
-    cost    REAL,
-    units   TEXT,
-    notes   TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, period, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS CostInvest
-(
-    region  TEXT,
-    tech    TEXT,
-    vintage INTEGER
-        REFERENCES TimePeriod (period),
-    cost    REAL,
-    units   TEXT,
-    notes   TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS CostVariable
-(
-    region  TEXT    NOT NULL,
-    period  INTEGER NOT NULL
-        REFERENCES TimePeriod (period),
-    tech    TEXT    NOT NULL,
-    vintage INTEGER NOT NULL
-        REFERENCES TimePeriod (period),
-    cost    REAL,
-    units   TEXT,
-    notes   TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, period, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS Demand
-(
-    region    TEXT,
-    period    INTEGER
-        REFERENCES TimePeriod (period),
-    commodity TEXT,
-    demand    REAL,
-    units     TEXT,
-    notes     TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (commodity) REFERENCES Commodity (name),
-    PRIMARY KEY (region, period, commodity)
-);
-CREATE TABLE IF NOT EXISTS DemandSpecificDistribution
-(
-    region      TEXT,
-    period      INTEGER
-        REFERENCES TimePeriod (period),
-    season TEXT
-        REFERENCES SeasonLabel (season),
-    tod         TEXT
-        REFERENCES TimeOfDay (tod),
-    demand_name TEXT,
-    dsd         REAL,
-    notes       TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (demand_name) REFERENCES Commodity (name),
-    PRIMARY KEY (region, period, season, tod, demand_name),
-    CHECK (dsd >= 0 AND dsd <= 1)
-);
-CREATE TABLE IF NOT EXISTS EndOfLifeOutput
-(
-    region      TEXT,
-    tech        TEXT,
-    vintage     INTEGER
-        REFERENCES TimePeriod (period),
-    output_comm   TEXT,
-    value       REAL,
-    units       TEXT,
-    notes       TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    FOREIGN KEY (output_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (region, tech, vintage, output_comm)
-);
-CREATE TABLE IF NOT EXISTS Efficiency
-(
-    region      TEXT,
-    input_comm  TEXT,
-    tech        TEXT,
-    vintage     INTEGER
-        REFERENCES TimePeriod (period),
-    output_comm TEXT,
-    efficiency  REAL,
-    notes       TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    FOREIGN KEY (input_comm) REFERENCES Commodity (name),
-    FOREIGN KEY (output_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (region, input_comm, tech, vintage, output_comm),
-    CHECK (efficiency > 0)
-);
-CREATE TABLE IF NOT EXISTS EfficiencyVariable
-(
-    region      TEXT,
-    period      INTEGER
-        REFERENCES TimePeriod (period),
-    season TEXT
-        REFERENCES SeasonLabel (season),
-    tod         TEXT
-        REFERENCES TimeOfDay (tod),
-    input_comm  TEXT,
-    tech        TEXT,
-    vintage     INTEGER
-        REFERENCES TimePeriod (period),
-    output_comm TEXT,
-    efficiency  REAL,
-    notes       TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    FOREIGN KEY (input_comm) REFERENCES Commodity (name),
-    FOREIGN KEY (output_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (region, period, season, tod, input_comm, tech, vintage, output_comm),
-    CHECK (efficiency > 0)
-);
-CREATE TABLE IF NOT EXISTS EmissionActivity
-(
-    region      TEXT,
-    emis_comm   TEXT,
-    input_comm  TEXT,
-    tech        TEXT,
-    vintage     INTEGER
-        REFERENCES TimePeriod (period),
-    output_comm TEXT,
-    activity    REAL,
-    units       TEXT,
-    notes       TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    FOREIGN KEY (emis_comm) REFERENCES Commodity (name),
-    FOREIGN KEY (input_comm) REFERENCES Commodity (name),
-    FOREIGN KEY (output_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (region, emis_comm, input_comm, tech, vintage, output_comm)
-);
-CREATE TABLE IF NOT EXISTS EmissionEmbodied
-(
-    region      TEXT,
-    emis_comm   TEXT,
-    tech        TEXT,
-    vintage     INTEGER
-        REFERENCES TimePeriod (period),
-    value       REAL,
-    units       TEXT,
-    notes       TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    FOREIGN KEY (emis_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (region, emis_comm,  tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS EmissionEndOfLife
-(
-    region      TEXT,
-    emis_comm   TEXT,
-    tech        TEXT,
-    vintage     INTEGER
-        REFERENCES TimePeriod (period),
-    value       REAL,
-    units       TEXT,
-    notes       TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    FOREIGN KEY (emis_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (region, emis_comm,  tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS ExistingCapacity
-(
-    region   TEXT,
-    tech     TEXT,
-    vintage  INTEGER
-        REFERENCES TimePeriod (period),
-    capacity REAL,
-    units    TEXT,
-    notes    TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS TechGroup
-(
-    group_name TEXT,
-    notes      TEXT,
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    PRIMARY KEY (group_name)
-);
-CREATE TABLE IF NOT EXISTS LoanLifetimeProcess
-(
-    region   TEXT,
-    tech     TEXT,
-    vintage  INTEGER
-        REFERENCES TimePeriod (period),
-    lifetime REAL,
-    notes    TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS LoanRate
-(
-    region  TEXT,
-    tech    TEXT,
-    vintage INTEGER
-        REFERENCES TimePeriod (period),
-    rate    REAL,
-    notes   TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS LifetimeProcess
-(
-    region   TEXT,
-    tech     TEXT,
-    vintage  INTEGER
-        REFERENCES TimePeriod (period),
-    lifetime REAL,
-    notes    TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS LifetimeTech
-(
-    region   TEXT,
-    tech     TEXT,
-    lifetime REAL,
-    notes    TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, tech)
-);
-CREATE TABLE IF NOT EXISTS Operator
-(
-	operator TEXT PRIMARY KEY,
-	notes TEXT
-);
-REPLACE INTO Operator VALUES('e','equal to');
-REPLACE INTO Operator VALUES('le','less than or equal to');
-REPLACE INTO Operator VALUES('ge','greater than or equal to');
-CREATE TABLE IF NOT EXISTS OutputDualVariable
-(
-    scenario        TEXT,
-    constraint_name TEXT,
-    dual            REAL,
-    PRIMARY KEY (constraint_name, scenario)
-);
-CREATE TABLE IF NOT EXISTS OutputObjective
-(
-    scenario          TEXT,
-    objective_name    TEXT,
-    total_system_cost REAL
-);
-CREATE TABLE IF NOT EXISTS OutputCurtailment
-(
-    scenario    TEXT,
-    region      TEXT,
-    sector      TEXT,
-    period      INTEGER
-        REFERENCES TimePeriod (period),
-    season      TEXT
-        REFERENCES TimePeriod (period),
-    tod         TEXT
-        REFERENCES TimeOfDay (tod),
-    input_comm  TEXT
-        REFERENCES Commodity (name),
-    tech        TEXT
-        REFERENCES Technology (tech),
-    vintage     INTEGER
-        REFERENCES TimePeriod (period),
-    output_comm TEXT
-        REFERENCES Commodity (name),
-    curtailment REAL,
-    PRIMARY KEY (region, scenario, period, season, tod, input_comm, tech, vintage, output_comm)
-);
-CREATE TABLE IF NOT EXISTS OutputNetCapacity
-(
-    scenario TEXT,
-    region   TEXT,
-    sector   TEXT
-        REFERENCES SectorLabel (sector),
-    period   INTEGER
-        REFERENCES TimePeriod (period),
-    tech     TEXT
-        REFERENCES Technology (tech),
-    vintage  INTEGER
-        REFERENCES TimePeriod (period),
-    capacity REAL,
-    PRIMARY KEY (region, scenario, period, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS OutputBuiltCapacity
-(
-    scenario TEXT,
-    region   TEXT,
-    sector   TEXT
-        REFERENCES SectorLabel (sector),
-    tech     TEXT
-        REFERENCES Technology (tech),
-    vintage  INTEGER
-        REFERENCES TimePeriod (period),
-    capacity REAL,
-    PRIMARY KEY (region, scenario, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS OutputRetiredCapacity
-(
-    scenario TEXT,
-    region   TEXT,
-    sector   TEXT
-        REFERENCES SectorLabel (sector),
-    period   INTEGER
-        REFERENCES TimePeriod (period),
-    tech     TEXT
-        REFERENCES Technology (tech),
-    vintage  INTEGER
-        REFERENCES TimePeriod (period),
-    cap_eol REAL,
-    cap_early REAL,
-    PRIMARY KEY (region, scenario, period, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS OutputFlowIn
-(
-    scenario    TEXT,
-    region      TEXT,
-    sector      TEXT
-        REFERENCES SectorLabel (sector),
-    period      INTEGER
-        REFERENCES TimePeriod (period),
-    season TEXT
-        REFERENCES SeasonLabel (season),
-    tod         TEXT
-        REFERENCES TimeOfDay (tod),
-    input_comm  TEXT
-        REFERENCES Commodity (name),
-    tech        TEXT
-        REFERENCES Technology (tech),
-    vintage     INTEGER
-        REFERENCES TimePeriod (period),
-    output_comm TEXT
-        REFERENCES Commodity (name),
-    flow        REAL,
-    PRIMARY KEY (region, scenario, period, season, tod, input_comm, tech, vintage, output_comm)
-);
-CREATE TABLE IF NOT EXISTS OutputFlowOut
-(
-    scenario    TEXT,
-    region      TEXT,
-    sector      TEXT
-        REFERENCES SectorLabel (sector),
-    period      INTEGER
-        REFERENCES TimePeriod (period),
-    season TEXT
-        REFERENCES SeasonLabel (season),
-    tod         TEXT
-        REFERENCES TimeOfDay (tod),
-    input_comm  TEXT
-        REFERENCES Commodity (name),
-    tech        TEXT
-        REFERENCES Technology (tech),
-    vintage     INTEGER
-        REFERENCES TimePeriod (period),
-    output_comm TEXT
-        REFERENCES Commodity (name),
-    flow        REAL,
-    PRIMARY KEY (region, scenario, period, season, tod, input_comm, tech, vintage, output_comm)
-);
-CREATE TABLE IF NOT EXISTS OutputStorageLevel
-(
-    scenario TEXT,
-    region TEXT,
-    sector TEXT
-        REFERENCES SectorLabel (sector),
-    period INTEGER
-        REFERENCES TimePeriod (period),
-    season TEXT
-        REFERENCES SeasonLabel (season),
-    tod TEXT
-        REFERENCES TimeOfDay (tod),
-    tech TEXT
-        REFERENCES Technology (tech),
-    vintage INTEGER
-        REFERENCES TimePeriod (period),
-    level REAL,
-    PRIMARY KEY (scenario, region, period, season, tod, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS OutputEmission
-(
-    scenario  TEXT,
-    region    TEXT,
-    sector    TEXT
-        REFERENCES SectorLabel (sector),
-    period    INTEGER
-        REFERENCES TimePeriod (period),
-    emis_comm TEXT
-        REFERENCES Commodity (name),
-    tech      TEXT
-        REFERENCES Technology (tech),
-    vintage   INTEGER
-        REFERENCES TimePeriod (period),
-    emission  REAL,
-    PRIMARY KEY (region, scenario, period, emis_comm, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS OutputCost
-(
-    scenario TEXT,
-    region   TEXT,
-    sector   TEXT REFERENCES SectorLabel (sector),
-    period   INTEGER REFERENCES TimePeriod (period),
-    tech     TEXT REFERENCES Technology (tech),
-    vintage  INTEGER REFERENCES TimePeriod (period),
-    d_invest REAL,
-    d_fixed  REAL,
-    d_var    REAL,
-    d_emiss  REAL,
-    invest   REAL,
-    fixed    REAL,
-    var      REAL,
-    emiss    REAL,
-    PRIMARY KEY (scenario, region, period, tech, vintage),
-    FOREIGN KEY (vintage) REFERENCES TimePeriod (period),
-    FOREIGN KEY (tech) REFERENCES Technology (tech)
-);
-CREATE TABLE IF NOT EXISTS LimitGrowthCapacity
-(
-    region TEXT,
-    tech_or_group   TEXT,
-    operator TEXT NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    rate   REAL NOT NULL DEFAULT 0,
-    seed   REAL NOT NULL DEFAULT 0,
-    seed_units TEXT,
-    notes  TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, tech_or_group, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitDegrowthCapacity
-(
-    region TEXT,
-    tech_or_group   TEXT,
-    operator TEXT NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    rate   REAL NOT NULL DEFAULT 0,
-    seed   REAL NOT NULL DEFAULT 0,
-    seed_units TEXT,
-    notes  TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, tech_or_group, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitGrowthNewCapacity
-(
-    region TEXT,
-    tech_or_group   TEXT,
-    operator TEXT NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    rate   REAL NOT NULL DEFAULT 0,
-    seed   REAL NOT NULL DEFAULT 0,
-    seed_units TEXT,
-    notes  TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, tech_or_group, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitDegrowthNewCapacity
-(
-    region TEXT,
-    tech_or_group   TEXT,
-    operator TEXT NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    rate   REAL NOT NULL DEFAULT 0,
-    seed   REAL NOT NULL DEFAULT 0,
-    seed_units TEXT,
-    notes  TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, tech_or_group, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitGrowthNewCapacityDelta
-(
-    region TEXT,
-    tech_or_group   TEXT,
-    operator TEXT NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    rate   REAL NOT NULL DEFAULT 0,
-    seed   REAL NOT NULL DEFAULT 0,
-    seed_units TEXT,
-    notes  TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, tech_or_group, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitDegrowthNewCapacityDelta
-(
-    region TEXT,
-    tech_or_group   TEXT,
-    operator TEXT NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    rate   REAL NOT NULL DEFAULT 0,
-    seed   REAL NOT NULL DEFAULT 0,
-    seed_units TEXT,
-    notes  TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, tech_or_group, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitStorageLevelFraction
-(
-    region   TEXT,
-    period   INTEGER
-        REFERENCES TimePeriod (period),
-    season TEXT
-        REFERENCES SeasonLabel (season),
-    tod      TEXT
-        REFERENCES TimeOfDay (tod),
-    tech     TEXT,
-    vintage  INTEGER
-        REFERENCES TimePeriod (period),
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    fraction REAL,
-    notes    TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, period, season, tod, tech, vintage, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitActivity
-(
-    region  TEXT,
-    period  INTEGER
-        REFERENCES TimePeriod (period),
-    tech_or_group   TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    activity REAL,
-    units   TEXT,
-    notes   TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, period, tech_or_group, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitActivityShare
-(
-    region         TEXT,
-    period         INTEGER
-        REFERENCES TimePeriod (period),
-    sub_group      TEXT,
-    super_group    TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    share REAL,
-    notes          TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, period, sub_group, super_group, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitAnnualCapacityFactor
-(
-    region      TEXT,
-    tech        TEXT,
-    vintage      INTEGER
-        REFERENCES TimePeriod (period),
-    output_comm TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    factor      REAL,
-    notes       TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    FOREIGN KEY (output_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (region, tech, vintage, output_comm, operator),
-    CHECK (factor >= 0 AND factor <= 1)
-);
-CREATE TABLE IF NOT EXISTS LimitCapacity
-(
-    region  TEXT,
-    period  INTEGER
-        REFERENCES TimePeriod (period),
-    tech_or_group   TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    capacity REAL,
-    units   TEXT,
-    notes   TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, period, tech_or_group, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitCapacityShare
-(
-    region         TEXT,
-    period         INTEGER
-        REFERENCES TimePeriod (period),
-    sub_group      TEXT,
-    super_group    TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    share REAL,
-    notes          TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, period, sub_group, super_group, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitNewCapacity
-(
-    region  TEXT,
-    period  INTEGER
-        REFERENCES TimePeriod (period),
-    tech_or_group   TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    new_cap REAL,
-    units   TEXT,
-    notes   TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, period, tech_or_group, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitNewCapacityShare
-(
-    region         TEXT,
-    period         INTEGER
-        REFERENCES TimePeriod (period),
-    sub_group      TEXT,
-    super_group    TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    share REAL,
-    notes          TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, period, sub_group, super_group, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitResource
-(
-    region  TEXT,
-    tech_or_group   TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    cum_act REAL,
-    units   TEXT,
-    notes   TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, tech_or_group, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitSeasonalCapacityFactor
-(
-	region  TEXT,
-	period	INTEGER
-        REFERENCES TimePeriod (period),
-	season TEXT
-        REFERENCES SeasonLabel (season),
-	tech    TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-	factor	REAL,
-	notes	TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (region) REFERENCES Region (region),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-	PRIMARY KEY (region, period, season, tech, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitTechInputSplit
-(
-    region         TEXT,
-    period         INTEGER
-        REFERENCES TimePeriod (period),
-    input_comm     TEXT,
-    tech           TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    proportion REAL,
-    notes          TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    FOREIGN KEY (input_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (region, period, input_comm, tech, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitTechInputSplitAnnual
-(
-    region         TEXT,
-    period         INTEGER
-        REFERENCES TimePeriod (period),
-    input_comm     TEXT,
-    tech           TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    proportion REAL,
-    notes          TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, period, input_comm, tech, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitTechOutputSplit
-(
-    region         TEXT,
-    period         INTEGER
-        REFERENCES TimePeriod (period),
-    tech           TEXT,
-    output_comm    TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    proportion REAL,
-    notes          TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    FOREIGN KEY (output_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (region, period, tech, output_comm, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitTechOutputSplitAnnual
-(
-    region         TEXT,
-    period         INTEGER
-        REFERENCES TimePeriod (period),
-    tech           TEXT,
-    output_comm    TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    proportion REAL,
-    notes          TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    FOREIGN KEY (output_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (region, period, tech, output_comm, operator)
-);
-CREATE TABLE IF NOT EXISTS LimitEmission
-(
-    region    TEXT,
-    period    INTEGER
-        REFERENCES TimePeriod (period),
-    emis_comm TEXT,
-    operator	TEXT  NOT NULL DEFAULT "le"
-    	REFERENCES Operator (operator),
-    value     REAL,
-    units     TEXT,
-    notes     TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (emis_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (region, period, emis_comm, operator)
-);
-CREATE TABLE IF NOT EXISTS LinkedTech
-(
-    primary_region TEXT,
-    primary_tech   TEXT,
-    emis_comm      TEXT,
-    driven_tech    TEXT,
-    notes          TEXT,
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (primary_tech) REFERENCES Technology (tech),
-    FOREIGN KEY (driven_tech) REFERENCES Technology (tech),
-    FOREIGN KEY (emis_comm) REFERENCES Commodity (name),
-    PRIMARY KEY (primary_region, primary_tech, emis_comm)
-);
-CREATE TABLE IF NOT EXISTS PlanningReserveMargin
-(
-    region TEXT,
-    margin REAL,
-    notes TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (region) REFERENCES Region (region),
-    PRIMARY KEY (region)
-);
-CREATE TABLE IF NOT EXISTS RampDownHourly
-(
-    region TEXT,
-    tech   TEXT,
-    rate   REAL,
-    notes TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, tech)
-);
-CREATE TABLE IF NOT EXISTS RampUpHourly
-(
-    region TEXT,
-    tech   TEXT,
-    rate   REAL,
-    notes TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, tech)
-);
-CREATE TABLE IF NOT EXISTS Region
-(
-    region TEXT,
-    notes  TEXT,
-    PRIMARY KEY (region)
-);
-CREATE TABLE IF NOT EXISTS ReserveCapacityDerate
-(
-    region  TEXT,
-    period  INTEGER
-        REFERENCES TimePeriod (period),
-    season  TEXT
-    	REFERENCES SeasonLabel (season),
-    tech    TEXT,
-    vintage INTEGER,
-    factor  REAL,
-    notes   TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, period, season, tech, vintage),
-    CHECK (factor >= 0 AND factor <= 1)
-);
-CREATE TABLE IF NOT EXISTS TimeSegmentFraction
-(   
-    period INTEGER
-        REFERENCES TimePeriod (period),
-    season TEXT
-        REFERENCES SeasonLabel (season),
-    tod     TEXT
-        REFERENCES TimeOfDay (tod),
-    segfrac REAL,
-    notes   TEXT,
-    PRIMARY KEY (period, season, tod),
-    CHECK (segfrac >= 0 AND segfrac <= 1)
-);
-CREATE TABLE IF NOT EXISTS StorageDuration
-(
-    region   TEXT,
-    tech     TEXT,
-    duration REAL,
-    notes    TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    PRIMARY KEY (region, tech)
-);
-CREATE TABLE IF NOT EXISTS LifetimeSurvivalCurve
-(
-    region  TEXT    NOT NULL,
-    period  INTEGER NOT NULL,
-    tech    TEXT    NOT NULL,
-    vintage INTEGER NOT NULL
-        REFERENCES TimePeriod (period),
-    fraction  REAL,
-    notes   TEXT,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    PRIMARY KEY (region, period, tech, vintage)
-);
-CREATE TABLE IF NOT EXISTS TechnologyType
-(
-    label       TEXT PRIMARY KEY,
-    description TEXT
-);
-REPLACE INTO TechnologyType
-VALUES ('p', 'production technology');
-REPLACE INTO TechnologyType
-VALUES ('pb', 'baseload production technology');
-REPLACE INTO TechnologyType
-VALUES ('ps', 'storage production technology');
--- CREATE TABLE IF NOT EXISTS TimeNext
--- (
---     period       INTEGER
---         REFERENCES TimePeriod (period),
---     season TEXT
---        REFERENCES SeasonLabel (season),
---     tod          TEXT
---         REFERENCES TimeOfDay (tod),
---     season_next TEXT
---        REFERENCES SeasonLabel (season),
---     tod_next     TEXT
---         REFERENCES TimeOfDay (tod),
---     notes        TEXT,
---     PRIMARY KEY (period, season, tod)
--- );
-CREATE TABLE IF NOT EXISTS TimeOfDay
-(
-    sequence INTEGER UNIQUE,
-    tod      TEXT
-        PRIMARY KEY
-);
-CREATE TABLE IF NOT EXISTS TimePeriod
-(
-    sequence INTEGER UNIQUE,
-    period   INTEGER
-        PRIMARY KEY,
-    flag     TEXT
-        REFERENCES TimePeriodType (label)
-);
-CREATE TABLE IF NOT EXISTS TimeSeason
-(
-    period INTEGER
-        REFERENCES TimePeriod (period),
-    sequence INTEGER,
-    season TEXT
-        REFERENCES SeasonLabel (season),
-    notes TEXT,
-    PRIMARY KEY (period, sequence, season)
-);
-CREATE TABLE IF NOT EXISTS TimeSeasonSequential
-(
-    period INTEGER
-        REFERENCES TimePeriod (period),
-    sequence INTEGER,
-    seas_seq TEXT,
-    season TEXT
-        REFERENCES SeasonLabel (season),
-    num_days REAL NOT NULL,
-    notes TEXT,
-    PRIMARY KEY (period, sequence, seas_seq, season),
-    CHECK (num_days > 0)
-);
-CREATE TABLE IF NOT EXISTS TimePeriodType
-(
-    label       TEXT PRIMARY KEY,
-    description TEXT
-);
-REPLACE INTO TimePeriodType
-VALUES('e', 'existing vintages');
-REPLACE INTO TimePeriodType
-VALUES('f', 'future');
-CREATE TABLE IF NOT EXISTS RPSRequirement
-(
-    region      TEXT    NOT NULL,
-    period      INTEGER NOT NULL
-        REFERENCES TimePeriod (period),
-    tech_group  TEXT    NOT NULL,
-    requirement REAL    NOT NULL,
-    data_source TEXT,
-    dq_cred INTEGER
-        REFERENCES DataQualityCredibility (dq_cred),
-    dq_geog INTEGER
-        REFERENCES DataQualityGeography (dq_geog),
-    dq_struc INTEGER
-        REFERENCES DataQualityStructure (dq_struc),
-    dq_tech INTEGER
-        REFERENCES DataQualityTechnology (dq_tech),
-    dq_time INTEGER
-        REFERENCES DataQualityTime (dq_time),
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    notes       TEXT,
-    FOREIGN KEY (data_source) REFERENCES DataSource (source_id),
-    FOREIGN KEY (region) REFERENCES Region (region),
-    FOREIGN KEY (tech_group) REFERENCES TechGroup (group_name),
-    PRIMARY KEY (region)
-);
-CREATE TABLE IF NOT EXISTS TechGroupMember
-(
-    group_name TEXT,
-    tech       TEXT,
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (tech) REFERENCES Technology (tech),
-    FOREIGN KEY (group_name) REFERENCES TechGroup (group_name),
-    PRIMARY KEY (group_name, tech)
-);
-CREATE TABLE IF NOT EXISTS Technology
+
+CREATE TABLE IF NOT EXISTS technology
 (
     tech         TEXT    NOT NULL,
     flag         TEXT    NOT NULL,
@@ -1755,84 +264,1431 @@ CREATE TABLE IF NOT EXISTS Technology
     exchange     INTEGER NOT NULL DEFAULT 0,
     seas_stor    INTEGER NOT NULL DEFAULT 0,
     description  TEXT,
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    FOREIGN KEY (flag) REFERENCES TechnologyType (label),
+    data_id      TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (flag) REFERENCES technology_type (label),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
     PRIMARY KEY (tech)
 );
-CREATE TABLE IF NOT EXISTS DataSource
+
+CREATE TABLE IF NOT EXISTS tech_group
 (
-    source_id TEXT,
-    source TEXT,
-    notes TEXT,
-    data_id TEXT
-        REFERENCES DataSet (data_id),
-    PRIMARY KEY (source_id)
+    group_name TEXT,
+    notes      TEXT,
+    data_id    TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (group_name) REFERENCES tech_group_label (group_name),
+    PRIMARY KEY (group_name)
 );
-CREATE TABLE IF NOT EXISTS DataQualityCredibility
+
+CREATE TABLE IF NOT EXISTS tech_group_member
 (
-    dq_cred INTEGER PRIMARY KEY,
-    description TEXT
+    group_name TEXT,
+    tech       TEXT,
+    data_id    TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    FOREIGN KEY (group_name) REFERENCES tech_group_label (group_name),
+    PRIMARY KEY (group_name, tech)
 );
-REPLACE INTO DataQualityCredibility VALUES (1,'Excellent - A trustworthy source backed by strong analysis or direct measurements.');
-REPLACE INTO DataQualityCredibility VALUES (2,'Good - Trustworthy source. Partly based on assumptions or imperfect analysis.');
-REPLACE INTO DataQualityCredibility VALUES (3,'Acceptable - Acceptable source. May rely on many assumptions, shallow analysis, or rough measurement.');
-REPLACE INTO DataQualityCredibility VALUES (4,'Lacking - Questionable or unverified source. Poorly measured or weak analysis.');
-REPLACE INTO DataQualityCredibility VALUES (5,'Unacceptable - No or untrustworthy source. Unsupported assumption.');
-CREATE TABLE IF NOT EXISTS DataQualityGeography
+
+-- ============================================================
+-- Data tables
+-- All include: data_id (in PK), data_source, dq_cred/geog/struc/tech/time
+-- ============================================================
+CREATE TABLE IF NOT EXISTS capacity_credit
 (
-    dq_geog INTEGER PRIMARY KEY,
-    description TEXT
+    region      TEXT,
+    period      INTEGER
+        REFERENCES time_period (period),
+    tech        TEXT,
+    vintage     INTEGER,
+    credit      REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, period, tech, vintage),
+    CHECK (credit >= 0 AND credit <= 1)
 );
-REPLACE INTO DataQualityGeography VALUES (1,'Excellent - From this region and at the correct aggregation level or a directly-applicable generic value.');
-REPLACE INTO DataQualityGeography VALUES (2,'Good - From an analogous region or the modelled region at incorrect aggregation level.');
-REPLACE INTO DataQualityGeography VALUES (3,'Acceptable - From a relevant but non-analogous region or highly aggregated.');
-REPLACE INTO DataQualityGeography VALUES (4,'Lacking - From a non-analogous region with limited relevance or a generic global value.');
-REPLACE INTO DataQualityGeography VALUES (5,'Unacceptable - From a region that is highly dissimilar to the modelled region, or from an unknown region.');
-CREATE TABLE IF NOT EXISTS DataQualityStructure
+
+CREATE TABLE IF NOT EXISTS capacity_factor_process
 (
-    dq_struc INTEGER PRIMARY KEY,
-    description TEXT
+    region      TEXT,
+    season      TEXT
+        REFERENCES time_season (season),
+    tod         TEXT
+        REFERENCES time_of_day (tod),
+    tech        TEXT,
+    vintage     INTEGER,
+    factor      REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, season, tod, tech, vintage),
+    CHECK (factor >= 0 AND factor <= 1)
 );
-REPLACE INTO DataQualityStructure VALUES (1,'Excellent - Excellent representation of the system, as good or better than other models.');
-REPLACE INTO DataQualityStructure VALUES (2,'Good - Well modelled, in line with what others are doing.');
-REPLACE INTO DataQualityStructure VALUES (3,'Acceptable - Room for improved representation but works for now.');
-REPLACE INTO DataQualityStructure VALUES (4,'Lacking - Poorly represented, overly simplified.');
-REPLACE INTO DataQualityStructure VALUES (5,'Unacceptable - Placeholder or dummy representation. Essentially not represented.');
-CREATE TABLE IF NOT EXISTS DataQualityTechnology
+
+CREATE TABLE IF NOT EXISTS capacity_factor_tech
 (
-    dq_tech INTEGER PRIMARY KEY,
-    description TEXT
+    region      TEXT,
+    season      TEXT
+        REFERENCES time_season (season),
+    tod         TEXT
+        REFERENCES time_of_day (tod),
+    tech        TEXT,
+    factor      REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, season, tod, tech),
+    CHECK (factor >= 0 AND factor <= 1)
 );
-REPLACE INTO DataQualityTechnology VALUES (1,'Excellent - For the modelled technology as represented. Directly applicable.');
-REPLACE INTO DataQualityTechnology VALUES (2,'Good - For the same general technology but not perfectly representative.');
-REPLACE INTO DataQualityTechnology VALUES (3,'Acceptable - For an analogous technology. Possibly a subset or general class. Roughly applicable.');
-REPLACE INTO DataQualityTechnology VALUES (4,'Lacking - Loosely representative. A niche subset or overbroad general class of the technology.');
-REPLACE INTO DataQualityTechnology VALUES (5,'Unacceptable - For a dissimilar or unknown technology. Unknown or poor applicability.');
-CREATE TABLE IF NOT EXISTS DataQualityTime
+
+CREATE TABLE IF NOT EXISTS capacity_to_activity
 (
-    dq_time INTEGER PRIMARY KEY,
-    description TEXT
+    region      TEXT,
+    tech        TEXT,
+    c2a         REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, tech)
 );
-REPLACE INTO DataQualityTime VALUES (1,'Excellent - From or directly applicable to the modelled time.');
-REPLACE INTO DataQualityTime VALUES (2,'Good - From a different but similar time or only slightly out of date. Still highly relevant.');
-REPLACE INTO DataQualityTime VALUES (3,'Acceptable - From a somewhat similar time or several years out of date but still relevant.');
-REPLACE INTO DataQualityTime VALUES (4,'Lacking - From a time with different conditions or significantly out of date. Questionable relevance.');
-REPLACE INTO DataQualityTime VALUES (5,'Unacceptable - From an irrelevant time or badly out of date.');
-CREATE TABLE IF NOT EXISTS DataSet
+
+CREATE TABLE IF NOT EXISTS construction_input
 (
-    data_id TEXT PRIMARY KEY,
-    label TEXT,
-    version TEXT,
-    description TEXT,
-    status TEXT,
-    author TEXT,
-    date TEXT,
-    parent_id TEXT
-        REFERENCES DataSet (data_id),
-    changelog TEXT,
-    notes TEXT
+    region      TEXT,
+    input_comm  TEXT,
+    tech        TEXT,
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    value       REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    FOREIGN KEY (input_comm) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, input_comm, tech, vintage)
+);
+
+CREATE TABLE IF NOT EXISTS cost_emission
+(
+    region      TEXT,
+    period      INTEGER
+        REFERENCES time_period (period),
+    emis_comm   TEXT NOT NULL,
+    cost        REAL NOT NULL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (emis_comm) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, period, emis_comm)
+);
+
+CREATE TABLE IF NOT EXISTS cost_fixed
+(
+    region      TEXT    NOT NULL,
+    period      INTEGER NOT NULL
+        REFERENCES time_period (period),
+    tech        TEXT    NOT NULL,
+    vintage     INTEGER NOT NULL
+        REFERENCES time_period (period),
+    cost        REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, period, tech, vintage)
+);
+
+CREATE TABLE IF NOT EXISTS cost_invest
+(
+    region      TEXT,
+    tech        TEXT,
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    cost        REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, tech, vintage)
+);
+
+CREATE TABLE IF NOT EXISTS cost_variable
+(
+    region      TEXT    NOT NULL,
+    period      INTEGER NOT NULL
+        REFERENCES time_period (period),
+    tech        TEXT    NOT NULL,
+    vintage     INTEGER NOT NULL
+        REFERENCES time_period (period),
+    cost        REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, period, tech, vintage)
+);
+
+CREATE TABLE IF NOT EXISTS demand
+(
+    region      TEXT,
+    period      INTEGER
+        REFERENCES time_period (period),
+    commodity   TEXT,
+    demand      REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (commodity) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, period, commodity)
+);
+
+CREATE TABLE IF NOT EXISTS demand_specific_distribution
+(
+    region      TEXT,
+    period      INTEGER
+        REFERENCES time_period (period),
+    season      TEXT
+        REFERENCES time_season (season),
+    tod         TEXT
+        REFERENCES time_of_day (tod),
+    demand_name TEXT,
+    dsd         REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (demand_name) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, period, season, tod, demand_name),
+    CHECK (dsd >= 0 AND dsd <= 1)
+);
+
+CREATE TABLE IF NOT EXISTS end_of_life_output
+(
+    region      TEXT,
+    tech        TEXT,
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    output_comm TEXT,
+    value       REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, tech, vintage, output_comm)
+);
+
+CREATE TABLE IF NOT EXISTS efficiency
+(
+    region      TEXT,
+    input_comm  TEXT,
+    tech        TEXT,
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    output_comm TEXT,
+    efficiency  REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    FOREIGN KEY (input_comm) REFERENCES commodity_label (commodity),
+    FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, input_comm, tech, vintage, output_comm),
+    CHECK (efficiency > 0)
+);
+
+CREATE TABLE IF NOT EXISTS efficiency_variable
+(
+    region      TEXT,
+    season      TEXT
+        REFERENCES time_season (season),
+    tod         TEXT
+        REFERENCES time_of_day (tod),
+    input_comm  TEXT,
+    tech        TEXT,
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    output_comm TEXT,
+    efficiency  REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    FOREIGN KEY (input_comm) REFERENCES commodity_label (commodity),
+    FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, season, tod, input_comm, tech, vintage, output_comm),
+    CHECK (efficiency > 0)
+);
+
+CREATE TABLE IF NOT EXISTS emission_activity
+(
+    region      TEXT,
+    emis_comm   TEXT,
+    input_comm  TEXT,
+    tech        TEXT,
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    output_comm TEXT,
+    activity    REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    FOREIGN KEY (emis_comm) REFERENCES commodity_label (commodity),
+    FOREIGN KEY (input_comm) REFERENCES commodity_label (commodity),
+    FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, emis_comm, input_comm, tech, vintage, output_comm)
+);
+
+CREATE TABLE IF NOT EXISTS emission_embodied
+(
+    region      TEXT,
+    emis_comm   TEXT,
+    tech        TEXT,
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    value       REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    FOREIGN KEY (emis_comm) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, emis_comm, tech, vintage)
+);
+
+CREATE TABLE IF NOT EXISTS emission_end_of_life
+(
+    region      TEXT,
+    emis_comm   TEXT,
+    tech        TEXT,
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    value       REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    FOREIGN KEY (emis_comm) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, emis_comm, tech, vintage)
+);
+
+CREATE TABLE IF NOT EXISTS existing_capacity
+(
+    region      TEXT,
+    tech        TEXT,
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    capacity    REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, tech, vintage)
+);
+
+CREATE TABLE IF NOT EXISTS loan_lifetime_process
+(
+    region      TEXT,
+    tech        TEXT,
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    lifetime    REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, tech, vintage)
+);
+
+CREATE TABLE IF NOT EXISTS loan_rate
+(
+    region      TEXT,
+    tech        TEXT,
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    rate        REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, tech, vintage)
+);
+
+CREATE TABLE IF NOT EXISTS lifetime_process
+(
+    region      TEXT,
+    tech        TEXT,
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    lifetime    REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, tech, vintage)
+);
+
+CREATE TABLE IF NOT EXISTS lifetime_tech
+(
+    region      TEXT,
+    tech        TEXT,
+    lifetime    REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, tech)
+);
+
+CREATE TABLE IF NOT EXISTS limit_growth_capacity
+(
+    region        TEXT,
+    tech_or_group TEXT,
+    operator      TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    rate          REAL NOT NULL DEFAULT 0,
+    seed          REAL NOT NULL DEFAULT 0,
+    seed_units    TEXT,
+    notes         TEXT,
+    data_source   TEXT,
+    dq_cred       INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog       INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc      INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech       INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time       INTEGER REFERENCES data_quality_time (dq_time),
+    data_id       TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, tech_or_group, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_degrowth_capacity
+(
+    region        TEXT,
+    tech_or_group TEXT,
+    operator      TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    rate          REAL NOT NULL DEFAULT 0,
+    seed          REAL NOT NULL DEFAULT 0,
+    seed_units    TEXT,
+    notes         TEXT,
+    data_source   TEXT,
+    dq_cred       INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog       INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc      INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech       INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time       INTEGER REFERENCES data_quality_time (dq_time),
+    data_id       TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, tech_or_group, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_growth_new_capacity
+(
+    region        TEXT,
+    tech_or_group TEXT,
+    operator      TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    rate          REAL NOT NULL DEFAULT 0,
+    seed          REAL NOT NULL DEFAULT 0,
+    seed_units    TEXT,
+    notes         TEXT,
+    data_source   TEXT,
+    dq_cred       INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog       INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc      INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech       INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time       INTEGER REFERENCES data_quality_time (dq_time),
+    data_id       TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, tech_or_group, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_degrowth_new_capacity
+(
+    region        TEXT,
+    tech_or_group TEXT,
+    operator      TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    rate          REAL NOT NULL DEFAULT 0,
+    seed          REAL NOT NULL DEFAULT 0,
+    seed_units    TEXT,
+    notes         TEXT,
+    data_source   TEXT,
+    dq_cred       INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog       INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc      INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech       INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time       INTEGER REFERENCES data_quality_time (dq_time),
+    data_id       TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, tech_or_group, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_growth_new_capacity_delta
+(
+    region        TEXT,
+    tech_or_group TEXT,
+    operator      TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    rate          REAL NOT NULL DEFAULT 0,
+    seed          REAL NOT NULL DEFAULT 0,
+    seed_units    TEXT,
+    notes         TEXT,
+    data_source   TEXT,
+    dq_cred       INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog       INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc      INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech       INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time       INTEGER REFERENCES data_quality_time (dq_time),
+    data_id       TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, tech_or_group, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_degrowth_new_capacity_delta
+(
+    region        TEXT,
+    tech_or_group TEXT,
+    operator      TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    rate          REAL NOT NULL DEFAULT 0,
+    seed          REAL NOT NULL DEFAULT 0,
+    seed_units    TEXT,
+    notes         TEXT,
+    data_source   TEXT,
+    dq_cred       INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog       INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc      INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech       INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time       INTEGER REFERENCES data_quality_time (dq_time),
+    data_id       TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, tech_or_group, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_storage_level_fraction
+(
+    region      TEXT,
+    season      TEXT
+        REFERENCES time_season (season),
+    tod         TEXT
+        REFERENCES time_of_day (tod),
+    tech        TEXT,
+    operator    TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    fraction    REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    CHECK (fraction >= 0 AND fraction <= 1),
+    PRIMARY KEY (region, season, tod, tech, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_activity
+(
+    region        TEXT,
+    period        INTEGER
+        REFERENCES time_period (period),
+    tech_or_group TEXT,
+    operator      TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    activity      REAL,
+    units         TEXT,
+    notes         TEXT,
+    data_source   TEXT,
+    dq_cred       INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog       INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc      INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech       INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time       INTEGER REFERENCES data_quality_time (dq_time),
+    data_id       TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, period, tech_or_group, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_activity_share
+(
+    region      TEXT,
+    period      INTEGER
+        REFERENCES time_period (period),
+    sub_group   TEXT,
+    super_group TEXT,
+    operator    TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    share       REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, period, sub_group, super_group, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_annual_capacity_factor
+(
+    region        TEXT,
+    tech_or_group TEXT,
+    vintage       INTEGER
+        REFERENCES time_period (period),
+    output_comm   TEXT,
+    operator      TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    factor        REAL,
+    notes         TEXT,
+    data_source   TEXT,
+    dq_cred       INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog       INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc      INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech       INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time       INTEGER REFERENCES data_quality_time (dq_time),
+    data_id       TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, tech_or_group, vintage, output_comm, operator),
+    CHECK (factor >= 0 AND factor <= 1)
+);
+
+CREATE TABLE IF NOT EXISTS limit_capacity
+(
+    region        TEXT,
+    period        INTEGER
+        REFERENCES time_period (period),
+    tech_or_group TEXT,
+    operator      TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    capacity      REAL,
+    units         TEXT,
+    notes         TEXT,
+    data_source   TEXT,
+    dq_cred       INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog       INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc      INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech       INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time       INTEGER REFERENCES data_quality_time (dq_time),
+    data_id       TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, period, tech_or_group, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_capacity_share
+(
+    region      TEXT,
+    period      INTEGER
+        REFERENCES time_period (period),
+    sub_group   TEXT,
+    super_group TEXT,
+    operator    TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    share       REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, period, sub_group, super_group, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_new_capacity
+(
+    region        TEXT,
+    tech_or_group TEXT,
+    vintage       INTEGER
+        REFERENCES time_period (period),
+    operator      TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    new_cap       REAL,
+    units         TEXT,
+    notes         TEXT,
+    data_source   TEXT,
+    dq_cred       INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog       INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc      INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech       INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time       INTEGER REFERENCES data_quality_time (dq_time),
+    data_id       TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, tech_or_group, vintage, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_new_capacity_share
+(
+    region      TEXT,
+    sub_group   TEXT,
+    super_group TEXT,
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    operator    TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    share       REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, sub_group, super_group, vintage, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_resource
+(
+    region        TEXT,
+    tech_or_group TEXT,
+    operator      TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    cum_act       REAL,
+    units         TEXT,
+    notes         TEXT,
+    data_source   TEXT,
+    dq_cred       INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog       INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc      INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech       INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time       INTEGER REFERENCES data_quality_time (dq_time),
+    data_id       TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, tech_or_group, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_seasonal_capacity_factor
+(
+    region        TEXT
+        REFERENCES region (region),
+    season        TEXT
+        REFERENCES time_season (season),
+    tech_or_group TEXT,
+    operator      TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    factor        REAL,
+    notes         TEXT,
+    data_source   TEXT,
+    dq_cred       INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog       INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc      INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech       INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time       INTEGER REFERENCES data_quality_time (dq_time),
+    data_id       TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, season, tech_or_group, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_tech_input_split
+(
+    region      TEXT,
+    period      INTEGER
+        REFERENCES time_period (period),
+    input_comm  TEXT,
+    tech        TEXT,
+    operator    TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    proportion  REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    FOREIGN KEY (input_comm) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, period, input_comm, tech, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_tech_input_split_annual
+(
+    region      TEXT,
+    period      INTEGER
+        REFERENCES time_period (period),
+    input_comm  TEXT,
+    tech        TEXT,
+    operator    TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    proportion  REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, period, input_comm, tech, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_tech_output_split
+(
+    region      TEXT,
+    period      INTEGER
+        REFERENCES time_period (period),
+    tech        TEXT,
+    output_comm TEXT,
+    operator    TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    proportion  REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, period, tech, output_comm, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_tech_output_split_annual
+(
+    region      TEXT,
+    period      INTEGER
+        REFERENCES time_period (period),
+    tech        TEXT,
+    output_comm TEXT,
+    operator    TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    proportion  REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    FOREIGN KEY (output_comm) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, period, tech, output_comm, operator)
+);
+
+CREATE TABLE IF NOT EXISTS limit_emission
+(
+    region      TEXT,
+    period      INTEGER
+        REFERENCES time_period (period),
+    emis_comm   TEXT,
+    operator    TEXT NOT NULL DEFAULT "le"
+        REFERENCES operator (operator),
+    value       REAL,
+    units       TEXT,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (emis_comm) REFERENCES commodity_label (commodity),
+    PRIMARY KEY (region, period, emis_comm, operator)
+);
+
+CREATE TABLE IF NOT EXISTS linked_tech
+(
+    primary_region TEXT,
+    primary_tech   TEXT,
+    emis_comm      TEXT,
+    driven_tech    TEXT,
+    notes          TEXT,
+    data_source TEXT,
+    data_id        TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (primary_tech) REFERENCES technology_label (tech),
+    FOREIGN KEY (driven_tech) REFERENCES technology_label (tech),
+    FOREIGN KEY (emis_comm) REFERENCES commodity_label (commodity),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (primary_region, primary_tech, emis_comm)
+);
+
+CREATE TABLE IF NOT EXISTS planning_reserve_margin
+(
+    region      TEXT,
+    margin      REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (region) REFERENCES region (region),
+    PRIMARY KEY (region)
+);
+
+CREATE TABLE IF NOT EXISTS ramp_down_hourly
+(
+    region      TEXT,
+    tech        TEXT,
+    rate        REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, tech)
+);
+
+CREATE TABLE IF NOT EXISTS ramp_up_hourly
+(
+    region      TEXT,
+    tech        TEXT,
+    rate        REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, tech)
+);
+
+CREATE TABLE IF NOT EXISTS reserve_capacity_derate
+(
+    region      TEXT,
+    season      TEXT
+        REFERENCES time_season (season),
+    tech        TEXT,
+    vintage     INTEGER,
+    factor      REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, season, tech, vintage),
+    CHECK (factor >= 0 AND factor <= 1)
+);
+
+CREATE TABLE IF NOT EXISTS storage_duration
+(
+    region      TEXT,
+    tech        TEXT,
+    duration    REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    PRIMARY KEY (region, tech)
+);
+
+CREATE TABLE IF NOT EXISTS lifetime_survival_curve
+(
+    region      TEXT    NOT NULL,
+    period      INTEGER NOT NULL,
+    tech        TEXT    NOT NULL,
+    vintage     INTEGER NOT NULL
+        REFERENCES time_period (period),
+    fraction    REAL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech),
+    PRIMARY KEY (region, period, tech, vintage)
+);
+
+CREATE TABLE IF NOT EXISTS rps_requirement
+(
+    region      TEXT    NOT NULL
+        REFERENCES region (region),
+    period      INTEGER NOT NULL
+        REFERENCES time_period (period),
+    tech_group  TEXT    NOT NULL,
+    requirement REAL    NOT NULL,
+    notes       TEXT,
+    data_source TEXT,
+    dq_cred     INTEGER REFERENCES data_quality_credibility (dq_cred),
+    dq_geog     INTEGER REFERENCES data_quality_geography (dq_geog),
+    dq_struc    INTEGER REFERENCES data_quality_structure (dq_struc),
+    dq_tech     INTEGER REFERENCES data_quality_technology (dq_tech),
+    dq_time     INTEGER REFERENCES data_quality_time (dq_time),
+    data_id     TEXT
+        REFERENCES data_set (data_id),
+    FOREIGN KEY (data_source) REFERENCES data_source_label (source_id),
+    FOREIGN KEY (tech_group) REFERENCES tech_group_label (group_name),
+    PRIMARY KEY (region, period, tech_group)
+);
+
+CREATE TABLE IF NOT EXISTS output_dual_variable
+(
+    scenario        TEXT,
+    constraint_name TEXT,
+    dual            REAL,
+    PRIMARY KEY (constraint_name, scenario)
+);
+CREATE TABLE IF NOT EXISTS output_objective
+(
+    scenario          TEXT,
+    objective_name    TEXT,
+    total_system_cost REAL
+);
+CREATE TABLE IF NOT EXISTS output_curtailment
+(
+    scenario    TEXT,
+    region      TEXT,
+    sector      TEXT,
+    period      INTEGER
+        REFERENCES time_period (period),
+    season      TEXT
+        REFERENCES time_season (season),
+    tod         TEXT
+        REFERENCES time_of_day (tod),
+    input_comm  TEXT
+        REFERENCES commodity_label (commodity),
+    tech        TEXT
+        REFERENCES technology_label (tech),
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    output_comm TEXT
+        REFERENCES commodity_label (commodity),
+    curtailment REAL,
+    units       TEXT,
+    PRIMARY KEY (region, scenario, period, season, tod, input_comm, tech, vintage, output_comm)
+);
+CREATE TABLE IF NOT EXISTS output_net_capacity
+(
+    scenario TEXT,
+    region   TEXT,
+    sector   TEXT
+        REFERENCES sector_label (sector),
+    period   INTEGER
+        REFERENCES time_period (period),
+    tech     TEXT
+        REFERENCES technology_label (tech),
+    vintage  INTEGER
+        REFERENCES time_period (period),
+    capacity REAL,
+    units    TEXT,
+    PRIMARY KEY (region, scenario, period, tech, vintage)
+);
+CREATE TABLE IF NOT EXISTS output_built_capacity
+(
+    scenario TEXT,
+    region   TEXT,
+    sector   TEXT
+        REFERENCES sector_label (sector),
+    tech     TEXT
+        REFERENCES technology_label (tech),
+    vintage  INTEGER
+        REFERENCES time_period (period),
+    capacity REAL,
+    units    TEXT,
+    PRIMARY KEY (region, scenario, tech, vintage)
+);
+CREATE TABLE IF NOT EXISTS output_retired_capacity
+(
+    scenario TEXT,
+    region   TEXT,
+    sector   TEXT
+        REFERENCES sector_label (sector),
+    period   INTEGER
+        REFERENCES time_period (period),
+    tech     TEXT
+        REFERENCES technology_label (tech),
+    vintage  INTEGER
+        REFERENCES time_period (period),
+    cap_eol REAL,
+    cap_early REAL,
+    units     TEXT,
+    PRIMARY KEY (region, scenario, period, tech, vintage)
+);
+CREATE TABLE IF NOT EXISTS output_flow_in
+(
+    scenario    TEXT,
+    region      TEXT,
+    sector      TEXT
+        REFERENCES sector_label (sector),
+    period      INTEGER
+        REFERENCES time_period (period),
+    season TEXT
+        REFERENCES time_season (season),
+    tod         TEXT
+        REFERENCES time_of_day (tod),
+    input_comm  TEXT
+        REFERENCES commodity_label (commodity),
+    tech        TEXT
+        REFERENCES technology_label (tech),
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    output_comm TEXT
+        REFERENCES commodity_label (commodity),
+    flow        REAL,
+    units       TEXT,
+    PRIMARY KEY (region, scenario, period, season, tod, input_comm, tech, vintage, output_comm)
+);
+CREATE TABLE IF NOT EXISTS output_flow_out
+(
+    scenario    TEXT,
+    region      TEXT,
+    sector      TEXT
+        REFERENCES sector_label (sector),
+    period      INTEGER
+        REFERENCES time_period (period),
+    season TEXT
+        REFERENCES time_season (season),
+    tod         TEXT
+        REFERENCES time_of_day (tod),
+    input_comm  TEXT
+        REFERENCES commodity_label (commodity),
+    tech        TEXT
+        REFERENCES technology_label (tech),
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    output_comm TEXT
+        REFERENCES commodity_label (commodity),
+    flow        REAL,
+    units       TEXT,
+    PRIMARY KEY (region, scenario, period, season, tod, input_comm, tech, vintage, output_comm)
+);
+CREATE TABLE IF NOT EXISTS output_storage_level
+(
+    scenario TEXT,
+    region TEXT,
+    sector TEXT
+        REFERENCES sector_label (sector),
+    period INTEGER
+        REFERENCES time_period (period),
+    season TEXT,
+    tod TEXT
+        REFERENCES time_of_day (tod),
+    tech TEXT
+        REFERENCES technology_label (tech),
+    vintage INTEGER
+        REFERENCES time_period (period),
+    level REAL,
+    units TEXT,
+    PRIMARY KEY (scenario, region, period, season, tod, tech, vintage)
+);
+CREATE TABLE IF NOT EXISTS output_emission
+(
+    scenario  TEXT,
+    region    TEXT,
+    sector    TEXT
+        REFERENCES sector_label (sector),
+    period    INTEGER
+        REFERENCES time_period (period),
+    emis_comm TEXT
+        REFERENCES commodity_label (commodity),
+    tech      TEXT
+        REFERENCES technology_label (tech),
+    vintage   INTEGER
+        REFERENCES time_period (period),
+    emission  REAL,
+    units     TEXT,
+    PRIMARY KEY (region, scenario, period, emis_comm, tech, vintage)
+);
+CREATE TABLE IF NOT EXISTS output_cost
+(
+    scenario TEXT,
+    region   TEXT,
+    sector   TEXT REFERENCES sector_label (sector),
+    period   INTEGER REFERENCES time_period (period),
+    tech     TEXT REFERENCES technology_label (tech),
+    vintage  INTEGER REFERENCES time_period (period),
+    d_invest REAL,
+    d_fixed  REAL,
+    d_var    REAL,
+    d_emiss  REAL,
+    invest   REAL,
+    fixed    REAL,
+    var      REAL,
+    emiss    REAL,
+    units    TEXT,
+    PRIMARY KEY (scenario, region, period, tech, vintage),
+    FOREIGN KEY (vintage) REFERENCES time_period (period),
+    FOREIGN KEY (tech) REFERENCES technology_label (tech)
+);
+CREATE TABLE IF NOT EXISTS myopic_efficiency
+(
+    base_year   integer,
+    region      text,
+    input_comm  TEXT
+        REFERENCES commodity_label (commodity),
+    tech        TEXT
+        REFERENCES technology_label (tech),
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    output_comm TEXT
+        REFERENCES commodity_label (commodity),
+    efficiency  real,
+    lifetime    integer,
+    PRIMARY KEY (region, input_comm, tech, vintage, output_comm)
+);
+-- for efficient searching by rtv:
+-- CREATE INDEX IF NOT EXISTS region_tech_vintage ON myopic_efficiency (region, tech, vintage);
+
+CREATE TABLE IF NOT EXISTS output_flow_out_summary
+(
+    scenario    TEXT,
+    region      TEXT,
+    sector      TEXT
+        REFERENCES sector_label (sector),
+    period      INTEGER
+        REFERENCES time_period (period),
+    input_comm  TEXT
+        REFERENCES commodity_label (commodity),
+    tech        TEXT
+        REFERENCES technology_label (tech),
+    vintage     INTEGER
+        REFERENCES time_period (period),
+    output_comm TEXT
+        REFERENCES commodity_label (commodity),
+    flow        REAL,
+    PRIMARY KEY (scenario, region, period, input_comm, tech, vintage, output_comm)
 );
 
 COMMIT;
-PRAGMA FOREIGN_KEYS = 1;
+PRAGMA foreign_keys = ON;
