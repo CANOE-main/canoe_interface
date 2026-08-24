@@ -105,10 +105,35 @@ def get_latest_data_ids(
     From a set of data IDs without versions, get the latest versioned IDs available in the input DB
     """
     viable_ids = get_viable_data_ids(input_filename, desired_ids)
-    latest_ids = sorted(set(
-        collect_latest_id(input_filename, base_id)
-        for base_id in viable_ids
-    ))
+    def data_id_priority(data_id: str) -> tuple:
+        """
+        Define insertion priority for CANOE data sets.
+        Lower numbers are inserted first and therefore take precedence
+        when INSERT OR IGNORE encounters duplicate primary keys.
+        """
+        priorities = {
+            "ELC": 1,
+            "IND": 2,
+            "COM": 3,
+            "RES": 4,
+            "TRP": 5,
+            "AGRI": 6,
+            "FUEL": 7,
+        }
+
+        for prefix, priority in priorities.items():
+            if data_id.startswith(prefix):
+                return priority, data_id
+
+        return 999, data_id
+    
+    latest_ids = sorted(
+        set(
+            collect_latest_id(input_filename, base_id)
+            for base_id in viable_ids
+        ),
+        key=data_id_priority
+    )
     logger.debug("Transferring the following data_IDs: %s", latest_ids)
     return latest_ids
 
@@ -258,9 +283,13 @@ def post_process(
             bad_rt = curs.execute(
                 """
                 SELECT DISTINCT region, tech
-                FROM efficiency 
-                WHERE output_comm NOT IN (SELECT name FROM commodity WHERE flag = 'd')
-                  AND (region, output_comm) NOT IN (SELECT region, input_comm FROM efficiency)
+                FROM efficiency
+                WHERE output_comm NOT IN (
+                    SELECT name FROM commodity WHERE flag = 'd'
+                )
+                AND (region, output_comm) NOT IN (
+                    SELECT region, input_comm FROM efficiency
+                )
                 """
             ).fetchall()
             if not bad_rt:
